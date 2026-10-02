@@ -1,0 +1,11 @@
+bin/
+obj/
+dist/
+.vs/
+.idea/
+*.user
+*.suo
+.DS_Store
+settings.json
+*.id
+/tmp/
