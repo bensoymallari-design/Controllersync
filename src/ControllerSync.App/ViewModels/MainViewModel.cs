@@ -1007,7 +1007,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     private void AddLog(string line)
     {
-        LogLines.Add(DateTime.Now.ToString("HH:mm:ss") + "  " + line);
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(() => AddLog(line));
+            return;
+        }
+
+        var entry = DateTime.Now.ToString("HH:mm:ss") + "  " + line;
+        LogLines.Add(entry);
         while (LogLines.Count > 200)
             LogLines.RemoveAt(0);
     }

@@ -1,4 +1,6 @@
 using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using ControllerSync.App.ViewModels;
 
@@ -24,6 +26,9 @@ public partial class MainWindow : Window
                 await clipboard.SetTextAsync(text);
         };
         viewModel.PickFile = PickContentFileAsync;
+        // The log sits inside the page scroller. Let the list move to the new line,
+        // then stop that request so Start stays where the user left it.
+        LogList.AddHandler(RequestBringIntoViewEvent, (_, e) => e.Handled = true, RoutingStrategies.Bubble, true);
         viewModel.LogLines.CollectionChanged += (_, _) =>
         {
             if (viewModel.LogLines.Count > 0)
