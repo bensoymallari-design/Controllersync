@@ -12,6 +12,7 @@ public class MediaTransferTests
         Assert.Contains("intro%20video.mp4", uri);
         Assert.DoesNotContain("%2F", uri);
         Assert.Equal("http://127.0.0.1:8080/api/v1/composition/layers/2/clips/5/open", ResolumeAddress.OpenUrl(8080, 2, 5));
+        Assert.Equal("http://127.0.0.1:8080/api/v1/composition/layers/2/clips/5/clear", ResolumeAddress.ClearUrl(8080, 2, 5));
     }
 
     [Fact]
@@ -88,6 +89,45 @@ public class MediaTransferTests
         Assert.False(receipt.Ok);
         Assert.Contains("damaged", receipt.Detail, StringComparison.OrdinalIgnoreCase);
         Assert.False(File.Exists(Path.Combine(directory, "intro.mp4")));
+    }
+
+    [Fact]
+    public void A_second_copy_gets_a_new_name_and_a_list_keeps_each_path()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "cs-names-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        File.WriteAllBytes(Path.Combine(directory, "intro.mp4"), new byte[] { 1 });
+        Assert.Equal(Path.Combine(directory, "intro-2.mp4"), MediaNames.NextFreePath(directory, "intro.mp4"));
+        File.WriteAllBytes(Path.Combine(directory, "intro-2.mp4"), new byte[] { 2 });
+        Assert.Equal(Path.Combine(directory, "intro-3.mp4"), MediaNames.NextFreePath(directory, @"..\intro.mp4"));
+
+        var files = MediaNames.FileList("C:\\Shows\\intro.mp4\r\nC:\\Shows\\loop.mov\nC:\\Shows\\intro.mp4\n");
+        Assert.Equal(new[] { "C:\\Shows\\intro.mp4", "C:\\Shows\\loop.mov" }, files);
+    }
+
+    [Fact]
+    public async Task Sending_the_same_name_again_saves_a_new_copy_and_still_opens_it()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "cs-media-" + Guid.NewGuid().ToString("N"));
+        var payload = System.Text.Encoding.UTF8.GetBytes("same-clip-again");
+        var opened = new List<string>();
+        await using var server = new MediaServer(directory, "show", (_, path, _) =>
+        {
+            opened.Add(path);
+            return Task.FromResult("Loaded " + Path.GetFileName(path));
+        });
+        await server.StartAsync("127.0.0.1", 0);
+
+        var first = await MediaClient.SendBytesAsync("127.0.0.1", server.BoundPort, "show", "intro.mp4", payload, 2, 4, true);
+        var second = await MediaClient.SendBytesAsync("127.0.0.1", server.BoundPort, "show", "intro.mp4", payload, 2, 4, true);
+
+        Assert.True(first.Ok);
+        Assert.True(second.Ok);
+        Assert.Equal(Path.Combine(directory, "intro.mp4"), first.SavedPath);
+        Assert.Equal(Path.Combine(directory, "intro-2.mp4"), second.SavedPath);
+        Assert.Equal(new[] { first.SavedPath, second.SavedPath }, opened);
+        Assert.Equal(payload, File.ReadAllBytes(second.SavedPath));
+        Assert.Contains("intro-2.mp4", second.Detail);
     }
 
     [Fact]

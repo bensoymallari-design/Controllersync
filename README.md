@@ -25,11 +25,13 @@ Use the **Resolume** tab when the same video or picture has to land in the same 
 1. On every laptop, choose **Resolume** at the top. PowerPoint sync stays off in that mode, so arrow keys, mouse, and slides are not sent. Stop the link before switching jobs.
 2. On every laptop, open Resolume and turn on **Preferences → Web Server**. Leave the port at `8080` unless you changed it, and put that number in **Resolume port**.
 3. Start the link on every laptop. Each app then listens for clips on the next port (`24710` listens for clips on `24711`). A laptop left on PowerPoint will not take the clip.
-4. On the laptop that has the file, choose it, set the **layer** and **clip** (these match the numbers in Resolume, starting at 1). **Width**, **height**, **X**, and **Y** are optional pixels. Leave a box empty to keep the value already in Resolume. Filled boxes are applied after the file opens and before playback starts. Then choose **Send to every laptop**.
+4. On the laptop that has the files, choose one or several. **Browse** can select more than one file, and you can also put one path on each line. Set the **layer** and **clip** (these match the numbers in Resolume, starting at 1). The first file uses that clip. Each following file uses the next clip on the same layer. **Width**, **height**, **X**, and **Y** are optional pixels and apply to every file in the send. Leave a box empty to keep the value already in Resolume. Filled boxes are applied after each file opens and before playback starts. Then choose **Send to every laptop**.
 5. The outgoing IP is included. For a third or fourth backup, add one IP per line under **More backup laptops**. If that laptop uses a different incoming port, write `192.168.1.22:24712`.
 6. **Start playback after load** connects the clip after Resolume opens it. **Also load on this laptop** does the same thing in the Resolume running on the machine you sent from.
 
-The file is copied to each laptop and saved in a `media` folder next to that laptop's settings. Resolume is then told to open that local file. A path on the sending laptop cannot be opened by Resolume on another machine.
+Each file is copied to each laptop and saved in a `media` folder next to that laptop's settings. Resolume is then told to open that local file. A path on the sending laptop cannot be opened by Resolume on another machine.
+
+Sending the same filename again does not overwrite the copy Resolume may already have open. The new copy is saved as `intro-2.mp4`, then `intro-3.mp4`, and that new file is what Resolume opens. The clip slot is cleared first so the new file replaces what was there.
 
 To try it on one computer, run two copies. Give the second copy a different incoming port, such as `24711`, so they do not fight over `24710`. Point the primary's outgoing IP at `127.0.0.1` and the backup's incoming port. Add `--settings=/path/to/folder` if both copies are the same file and you want each one to keep its own settings.
 

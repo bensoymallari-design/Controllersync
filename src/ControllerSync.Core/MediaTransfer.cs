@@ -43,6 +43,44 @@ public static class MediaNames
         return cleaned;
     }
 
+    public static string NextFreePath(string directory, string? fileName)
+    {
+        var safe = SafeFileName(fileName);
+        var preferred = Path.Combine(directory, safe);
+        if (!File.Exists(preferred))
+            return preferred;
+
+        var stem = Path.GetFileNameWithoutExtension(safe);
+        var ext = Path.GetExtension(safe);
+        for (var number = 2; number < 10000; number++)
+        {
+            var candidate = Path.Combine(directory, stem + "-" + number + ext);
+            if (!File.Exists(candidate))
+                return candidate;
+        }
+
+        return Path.Combine(directory, stem + "-" + Guid.NewGuid().ToString("N") + ext);
+    }
+
+    public static IReadOnlyList<string> FileList(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return Array.Empty<string>();
+
+        var list = new List<string>();
+        foreach (var raw in text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var line = raw.Trim().Trim('"');
+            if (line.Length == 0)
+                continue;
+            if (list.Any(item => item.Equals(line, StringComparison.OrdinalIgnoreCase)))
+                continue;
+            list.Add(line);
+        }
+
+        return list;
+    }
+
     public static IReadOnlyList<MediaTarget> Targets(string? remoteHost, int remoteSyncPort, string? extraLines)
     {
         var list = new List<MediaTarget>();
@@ -96,6 +134,9 @@ public static class ResolumeAddress
     public static string OpenUrl(int port, int layer, int clip) =>
         $"http://127.0.0.1:{port}/api/v1/composition/layers/{layer}/clips/{clip}/open";
 
+    public static string ClearUrl(int port, int layer, int clip) =>
+        $"http://127.0.0.1:{port}/api/v1/composition/layers/{layer}/clips/{clip}/clear";
+
     public static string ConnectUrl(int port, int layer, int clip) =>
         $"http://127.0.0.1:{port}/api/v1/composition/layers/{layer}/clips/{clip}/connect";
 
@@ -121,6 +162,7 @@ public sealed class MediaServer : IAsyncDisposable
     private readonly string _directory;
     private readonly string _channel;
     private readonly Func<MediaHeader, string, CancellationToken, Task<string>>? _afterSave;
+    private readonly object _place = new();
     private TcpListener? _listener;
     private CancellationTokenSource? _cts;
     private Task? _accept;
@@ -279,8 +321,7 @@ public sealed class MediaServer : IAsyncDisposable
                     return;
                 }
 
-                var destination = Path.Combine(_directory, MediaNames.SafeFileName(header.FileName));
-                File.Move(temp, destination, overwrite: true);
+                var destination = PlaceFile(temp, header.FileName);
                 temp = null;
                 var detail = "Saved " + destination + ".";
                 if (_afterSave != null)
@@ -312,6 +353,30 @@ public sealed class MediaServer : IAsyncDisposable
                     }
                 }
             }
+        }
+    }
+
+    private string PlaceFile(string temp, string? fileName)
+    {
+        lock (_place)
+        {
+            for (var attempt = 0; attempt < 5; attempt++)
+            {
+                var destination = MediaNames.NextFreePath(_directory, fileName);
+                try
+                {
+                    File.Move(temp, destination);
+                    return destination;
+                }
+                catch (IOException) when (File.Exists(destination))
+                {
+                    // Another upload took that name between the check and the move.
+                }
+            }
+
+            var fallback = MediaNames.NextFreePath(_directory, Path.GetFileNameWithoutExtension(MediaNames.SafeFileName(fileName)) + "-" + Guid.NewGuid().ToString("N") + Path.GetExtension(MediaNames.SafeFileName(fileName)));
+            File.Move(temp, fallback);
+            return fallback;
         }
     }
 

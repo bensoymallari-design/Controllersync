@@ -119,7 +119,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public Func<string, Task>? CopyText { get; set; }
 
-    public Func<Task<string?>>? PickFile { get; set; }
+    public Func<Task<IReadOnlyList<string>?>>? PickFile { get; set; }
 
     public string MachineName => _machineName;
     public bool IsWindows { get; } = OperatingSystem.IsWindows();
@@ -641,16 +641,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         if (PickFile == null)
             return;
-        var path = await PickFile();
-        if (path == null)
+        var paths = await PickFile();
+        if (paths == null)
             return;
-        if (path.Length == 0)
+        if (paths.Count == 0)
         {
-            FormError = "Choose a file that is saved on this laptop.";
+            FormError = "Choose files that are saved on this laptop.";
             return;
         }
 
-        ContentPath = path;
+        ContentPath = string.Join(Environment.NewLine, paths);
         FormError = "";
     }
 
@@ -670,9 +670,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             return;
         }
 
-        if (!File.Exists(ContentPath))
+        var files = MediaNames.FileList(ContentPath);
+        if (files.Count == 0 || files.Any(path => !File.Exists(path)))
         {
-            FormError = "Choose a video or picture that is saved on this laptop.";
+            FormError = "Choose videos or pictures that are saved on this laptop. Put one path on each line.";
+            return;
+        }
+
+        if (files.Count > 64)
+        {
+            FormError = "Send up to 64 files at a time.";
             return;
         }
 
@@ -710,6 +717,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             return;
         }
 
+        if (clip > 256 || clip + files.Count - 1 > 256)
+        {
+            FormError = "Keep the last clip at 256 or below. Start at a lower clip, or send fewer files.";
+            return;
+        }
+
         IsSending = true;
         FormError = "";
         ContentProgress = 0;
@@ -717,52 +730,47 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         try
         {
             var place = frame.Describe();
-            AddLog("Sending " + Path.GetFileName(ContentPath) + " to layer " + layer + ", clip " + clip + (place.Length == 0 ? "." : ", " + place + "."));
-            var index = 0;
-            foreach (var target in targets)
+            var lastClip = clip + files.Count - 1;
+            AddLog(files.Count == 1
+                ? "Sending " + Path.GetFileName(files[0]) + " to layer " + layer + ", clip " + clip + (place.Length == 0 ? "." : ", " + place + ".")
+                : "Sending " + files.Count + " files to layer " + layer + ", clips " + clip + "–" + lastClip + (place.Length == 0 ? "." : ", " + place + "."));
+            for (var fileIndex = 0; fileIndex < files.Count; fileIndex++)
             {
-                index++;
-                ContentStatus = "Sending to " + target.Host + " (" + index + " of " + targets.Count + ")...";
-                ContentProgress = 0;
-                var progress = new Progress<double>(value => ContentProgress = value);
-                try
+                var path = files[fileIndex];
+                var fileClip = clip + fileIndex;
+                var fileName = Path.GetFileName(path);
+                ContentStatus = "Sending " + fileName + " to clip " + fileClip + " (" + (fileIndex + 1) + " of " + files.Count + ")...";
+                var progress = new Progress<double>(value => ContentProgress = (fileIndex + value) / files.Count);
+                var sends = targets.Select(target => SendOneAsync(target, path, layer, fileClip, frame, progress)).ToArray();
+                var results = await Task.WhenAll(sends);
+                foreach (var result in results)
                 {
-                    var receipt = await MediaClient.SendFileAsync(
-                        target.Host,
-                        target.Port,
-                        Channel,
-                        ContentPath,
-                        layer,
-                        clip,
-                        PlayAfterLoad,
-                        frame,
-                        progress);
-                    AddLog(target.Host + ": " + receipt.Detail);
-                    if (!receipt.Ok)
-                        failures.Add(target.Host + ": " + receipt.Detail);
-                }
-                catch (Exception ex)
-                {
-                    var message = target.Host + " did not receive the file. Start the link on that laptop first.";
-                    AddLog(message + " " + ex.Message);
-                    failures.Add(message);
-                }
-            }
+                    if (result.Error != null)
+                    {
+                        var message = result.Target.Host + " did not receive " + fileName + ". Start the link on that laptop first.";
+                        AddLog(message + " " + result.Error);
+                        failures.Add(message);
+                        continue;
+                    }
 
-            if (LoadOnThisLaptop)
-            {
-                ContentStatus = "Loading on this laptop...";
-                var local = await _resolume.OpenAsync(ContentPath, layer, clip, PlayAfterLoad, resolumePort, frame, CancellationToken.None);
-                AddLog(local);
-                if (!local.StartsWith("Loaded", StringComparison.Ordinal))
-                    failures.Add(local);
+                    AddLog(result.Target.Host + ": " + result.Receipt!.Detail);
+                    if (!result.Receipt.Ok)
+                        failures.Add(result.Target.Host + ": " + result.Receipt.Detail);
+                }
+
+                if (LoadOnThisLaptop)
+                {
+                    ContentStatus = "Loading " + fileName + " on this laptop...";
+                    var local = await _resolume.OpenAsync(path, layer, fileClip, PlayAfterLoad, resolumePort, frame, CancellationToken.None);
+                    AddLog(local);
+                    if (!local.StartsWith("Loaded", StringComparison.Ordinal))
+                        failures.Add(local);
+                }
             }
 
             ContentProgress = failures.Count == 0 ? 1 : 0;
             ContentStatus = failures.Count == 0
-                ? targets.Count == 0
-                    ? "Loaded on this laptop."
-                    : "Sent to " + targets.Count + (targets.Count == 1 ? " laptop." : " laptops.")
+                ? DescribeSend(files.Count, targets.Count)
                 : "Finished with a problem. The activity log has the detail.";
             FormError = failures.Count == 0 ? "" : failures[0];
         }
@@ -770,6 +778,43 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             IsSending = false;
         }
+    }
+
+    private async Task<(MediaTarget Target, MediaReceipt? Receipt, string? Error)> SendOneAsync(
+        MediaTarget target,
+        string path,
+        int layer,
+        int clip,
+        ClipFrame frame,
+        IProgress<double> progress)
+    {
+        try
+        {
+            var receipt = await MediaClient.SendFileAsync(
+                target.Host,
+                target.Port,
+                Channel,
+                path,
+                layer,
+                clip,
+                PlayAfterLoad,
+                frame,
+                progress);
+            return (target, receipt, null);
+        }
+        catch (Exception ex)
+        {
+            return (target, null, ex.Message);
+        }
+    }
+
+    private static string DescribeSend(int files, int laptops)
+    {
+        if (laptops == 0)
+            return files == 1 ? "Loaded on this laptop." : "Loaded " + files + " files on this laptop.";
+        var fileText = files == 1 ? "Sent" : "Sent " + files + " files";
+        var laptopText = laptops == 1 ? "1 laptop." : laptops + " laptops.";
+        return fileText + " to " + laptopText;
     }
 
     private int CurrentResolumePort() =>
