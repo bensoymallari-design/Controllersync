@@ -14,7 +14,7 @@
     <Grid ColumnDefinitions="*,Auto">
       <StackPanel Spacing="4">
         <TextBlock Classes="h1" Text="CONTROLLERSYNC"/>
-        <TextBlock Classes="muted" Text="Local-network backup for PowerPoint, and a Resolume tab that copies one clip onto every backup laptop."/>
+        <TextBlock Classes="muted" Text="PowerPoint backup or Resolume clips. One job at a time, so they do not run together."/>
         <TextBlock Classes="muted" Text="{Binding MachineName, StringFormat='This laptop: {0}'}"/>
       </StackPanel>
       <Border Grid.Column="1" Classes="tally" Classes.live="{Binding IsRunning}" Classes.up="{Binding IsLinked}" VerticalAlignment="Top" Margin="20,0,0,0">
@@ -27,7 +27,21 @@
     </Grid>
 
     <StackPanel Grid.Row="1" Spacing="10">
-      <Grid ColumnDefinitions="*,*,*" ColumnSpacing="10">
+      <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+        <Button Classes="role" Classes.selected="{Binding IsPowerPoint}" Command="{Binding SetJobCommand}" CommandParameter="PowerPoint">
+          <StackPanel Spacing="2">
+            <TextBlock Text="PowerPoint" FontWeight="Bold" FontSize="16"/>
+            <TextBlock Text="Slide sync only" FontSize="12" Foreground="#A7A094"/>
+          </StackPanel>
+        </Button>
+        <Button Grid.Column="1" Classes="role" Classes.selected="{Binding IsResolume}" Command="{Binding SetJobCommand}" CommandParameter="Resolume">
+          <StackPanel Spacing="2">
+            <TextBlock Text="Resolume" FontWeight="Bold" FontSize="16"/>
+            <TextBlock Text="Clips only, no slide sync" FontSize="12" Foreground="#A7A094"/>
+          </StackPanel>
+        </Button>
+      </Grid>
+      <Grid ColumnDefinitions="*,*,*" ColumnSpacing="10" IsVisible="{Binding IsPowerPoint}">
         <Button Classes="role" Classes.selected="{Binding IsPrimary}" Command="{Binding SetRoleCommand}" CommandParameter="Primary">
           <StackPanel Spacing="2">
             <TextBlock Text="Primary" FontWeight="Bold" FontSize="16"/>
@@ -98,14 +112,15 @@
                 <StackPanel Spacing="4">
                   <TextBlock Classes="label" Text="WHAT TO SYNC"/>
                   <TextBlock Classes="muted" Text="Presentation keys are arrows, space, Page Up and Down, Enter, Home, End, F5, Escape, B, and W. Other keys stay on this laptop unless you opt in."/>
-                  <WrapPanel>
-                    <CheckBox Content="Presentation keys" IsChecked="{Binding SendKeyboard}" IsEnabled="{Binding !IsRunning}" Margin="0,4,18,4"/>
-                    <CheckBox Content="Mouse clicks" IsChecked="{Binding SendMouseClicks}" IsEnabled="{Binding !IsRunning}" Margin="0,4,18,4"/>
-                    <CheckBox Content="Mouse movement" IsChecked="{Binding SendMouseMove}" IsEnabled="{Binding !IsRunning}" Margin="0,4,18,4"/>
-                    <CheckBox Content="Every key" IsChecked="{Binding SendAllKeys}" IsEnabled="{Binding !IsRunning}" Margin="0,4,18,4"/>
-                    <CheckBox Content="Publish slide position" IsChecked="{Binding PublishSlides}" IsEnabled="{Binding !IsRunning}" Margin="0,4,18,4"/>
-                    <CheckBox Content="Follow the other laptop" IsChecked="{Binding FollowSlides}" IsEnabled="{Binding !IsRunning}" Margin="0,4,18,4"/>
-                  </WrapPanel>
+                <TextBlock Foreground="#E0A23A" Text="PowerPoint sync is off in Resolume mode. Arrow keys, mouse, and slides stay on this laptop. Stop the link and choose PowerPoint to use them again." TextWrapping="Wrap" IsVisible="{Binding IsResolume}" Margin="0,4,0,4"/>
+                <WrapPanel>
+                  <CheckBox Content="Presentation keys" IsChecked="{Binding SendKeyboard}" IsEnabled="{Binding CanEditShow}" Margin="0,4,18,4"/>
+                  <CheckBox Content="Mouse clicks" IsChecked="{Binding SendMouseClicks}" IsEnabled="{Binding CanEditShow}" Margin="0,4,18,4"/>
+                  <CheckBox Content="Mouse movement" IsChecked="{Binding SendMouseMove}" IsEnabled="{Binding CanEditShow}" Margin="0,4,18,4"/>
+                  <CheckBox Content="Every key" IsChecked="{Binding SendAllKeys}" IsEnabled="{Binding CanEditShow}" Margin="0,4,18,4"/>
+                  <CheckBox Content="Publish slide position" IsChecked="{Binding PublishSlides}" IsEnabled="{Binding CanEditShow}" Margin="0,4,18,4"/>
+                  <CheckBox Content="Follow the other laptop" IsChecked="{Binding FollowSlides}" IsEnabled="{Binding CanEditShow}" Margin="0,4,18,4"/>
+                </WrapPanel>
                   <TextBlock Foreground="#E07A5F" Text="Every key includes passwords. Leave that off on a show laptop." IsVisible="{Binding SendAllKeys}"/>
                   <TextBlock Classes="muted" Text="Mouse movement is off by default. Slide changes do not need it, and it fills the link." IsVisible="{Binding SendMouseMove}"/>
                 </StackPanel>
@@ -128,7 +143,8 @@
               <Border Classes="card">
                 <StackPanel Spacing="8">
                   <TextBlock Classes="label" Text="CLIP FOR EVERY LAPTOP"/>
-                  <TextBlock Classes="muted" Text="Start the link on this laptop and on every backup first. One send copies the file onto each machine and loads the same layer and clip in that laptop's Resolume. In Resolume, open Preferences, Web Server, and turn it on. The usual port is 8080."/>
+                  <TextBlock Foreground="#E0A23A" Text="Clip sending is off while PowerPoint sync is on. Stop the link and choose Resolume. Every laptop that should take the clip must be on Resolume too." TextWrapping="Wrap" IsVisible="{Binding IsPowerPoint}"/>
+                  <TextBlock Classes="muted" Text="Start the link on this laptop and on every backup first. One send copies the file onto each machine and loads the same layer and clip in that laptop's Resolume. PowerPoint keys and slides are not used. In Resolume, open Preferences, Web Server, and turn it on. The usual port is 8080."/>
                   <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                     <TextBox Classes="mono" Watermark="C:\Shows\intro.mp4" Text="{Binding ContentPath}"/>
                     <Button Grid.Column="1" Classes="quiet" Content="Browse" Command="{Binding PickContentCommand}" MinWidth="110"/>

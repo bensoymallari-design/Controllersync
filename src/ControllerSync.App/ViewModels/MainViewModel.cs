@@ -34,6 +34,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private string _remotePortText = "24710";
     private string _channel = "show";
     private string _role = "Primary";
+    private string _job = "PowerPoint";
     private bool _sendKeyboard = true;
     private bool _sendAllKeys;
     private bool _sendMouseClicks = true;
@@ -80,13 +81,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _machineName = Environment.MachineName;
         _startCommand = new RelayCommand(StartAsync, () => !IsRunning);
         _stopCommand = new RelayCommand(Stop, () => IsRunning);
-        _previousCommand = new RelayCommand(() => Nudge(ShowAction.Previous), () => IsRunning);
-        _nextCommand = new RelayCommand(() => Nudge(ShowAction.Next), () => IsRunning);
-        _blackCommand = new RelayCommand(() => Nudge(ShowAction.BlackScreen), () => IsRunning);
-        _sendContentCommand = new RelayCommand(SendContentAsync, () => IsRunning && !_isSending);
+        _previousCommand = new RelayCommand(() => Nudge(ShowAction.Previous), () => IsRunning && IsPowerPoint);
+        _nextCommand = new RelayCommand(() => Nudge(ShowAction.Next), () => IsRunning && IsPowerPoint);
+        _blackCommand = new RelayCommand(() => Nudge(ShowAction.BlackScreen), () => IsRunning && IsPowerPoint);
+        _sendContentCommand = new RelayCommand(SendContentAsync, () => IsRunning && IsResolume && !_isSending);
         SetRoleCommand = new RelayCommand(parameter =>
         {
             ApplyRole(parameter as string);
+            return Task.CompletedTask;
+        }, _ => !IsRunning && IsPowerPoint);
+        SetJobCommand = new RelayCommand(parameter =>
+        {
+            ApplyJob(parameter as string);
             return Task.CompletedTask;
         }, _ => !IsRunning);
         CopyIpCommand = new RelayCommand(CopyIpAsync);
@@ -124,6 +130,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public RelayCommand NextCommand => _nextCommand;
     public RelayCommand BlackCommand => _blackCommand;
     public RelayCommand SetRoleCommand { get; }
+    public RelayCommand SetJobCommand { get; }
     public RelayCommand CopyIpCommand { get; }
     public RelayCommand FirewallCommand { get; }
     public RelayCommand SendContentCommand => _sendContentCommand;
@@ -181,6 +188,25 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public bool IsBackup => Role == "Backup";
     public bool IsTwoWay => Role == "TwoWay";
 
+    public string Job
+    {
+        get => _job;
+        private set
+        {
+            if (!Set(ref _job, value, save: true))
+                return;
+            Raise(nameof(IsPowerPoint));
+            Raise(nameof(IsResolume));
+            Raise(nameof(CanEditShow));
+            UpdateRoleHelp();
+            RefreshCommands();
+        }
+    }
+
+    public bool IsPowerPoint => Job != "Resolume";
+    public bool IsResolume => Job == "Resolume";
+    public bool CanEditShow => IsPowerPoint && !IsRunning;
+
     public bool SendKeyboard
     {
         get => _sendKeyboard;
@@ -236,6 +262,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             if (!Set(ref _isRunning, value, save: false))
                 return;
+            Raise(nameof(CanEditShow));
             UpdateTally();
             RefreshCommands();
         }
@@ -411,7 +438,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             return;
         FormError = "";
         RefreshIps();
-        var needsRemote = SendKeyboard || SendAllKeys || SendMouseClicks || SendMouseMove || PublishSlides;
+        var needsRemote = IsPowerPoint && (SendKeyboard || SendAllKeys || SendMouseClicks || SendMouseMove || PublishSlides);
         if (!LinkForm.TryParse(
                 new LinkRequest(BindAddress, ListenPortText, RemoteAddress, RemotePortText, Channel, needsRemote),
                 out var endpoints,
@@ -423,6 +450,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
 
         SaveSettings();
+        if (IsResolume)
+        {
+            await StartResolumeAsync(endpoints);
+            return;
+        }
+
         var node = new SyncNode();
         var slides = PlatformHost.CreateSlides();
         var link = new ShowLink(
@@ -484,6 +517,42 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         if (!string.IsNullOrWhiteSpace(endpoints.RemoteHost))
             AddLog("Outgoing address is " + endpoints.RemoteHost + ":" + endpoints.RemotePort + ".");
         AddLog("Click the PowerPoint window when you are ready. Typing in this window is not sent.");
+        AddLog("Resolume clips are off, so this link cannot load a clip.");
+    }
+
+    private async Task StartResolumeAsync(LinkEndpoints endpoints)
+    {
+        var node = new SyncNode();
+        node.Notice += line => Ui(() => AddLog(line));
+        node.LinkChanged += snapshot => Ui(() => ApplyLink(snapshot));
+        try
+        {
+            await node.StartAsync(new SyncNodeOptions
+            {
+                BindAddress = endpoints.BindAddress,
+                ListenPort = endpoints.ListenPort,
+                RemoteAddress = endpoints.RemoteHost,
+                RemotePort = endpoints.RemotePort,
+                Channel = endpoints.Channel,
+                MachineId = _machineId,
+                MachineName = _machineName
+            });
+        }
+        catch (Exception ex)
+        {
+            await node.DisposeAsync();
+            FormError = ex.Message;
+            AddLog(ex.Message);
+            return;
+        }
+
+        _node = node;
+        IsRunning = true;
+        Banner = "READY";
+        AddLog("Listening on " + endpoints.BindAddress + ":" + node.BoundPort + ".");
+        if (!string.IsNullOrWhiteSpace(endpoints.RemoteHost))
+            AddLog("Outgoing address is " + endpoints.RemoteHost + ":" + endpoints.RemotePort + ".");
+        AddLog("PowerPoint sync is off. Arrow keys, mouse, and slides stay on this laptop.");
         await StartMediaAsync(endpoints);
     }
 
@@ -513,6 +582,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     private void Nudge(ShowAction action)
     {
+        if (!IsPowerPoint)
+        {
+            FormError = "PowerPoint cues are off while Resolume is in use.";
+            return;
+        }
+
         if (_link == null)
         {
             FormError = "Start the link first.";
@@ -581,6 +656,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     private async Task SendContentAsync()
     {
+        if (!IsResolume)
+        {
+            FormError = "Switch to Resolume first. PowerPoint sync stays off while clips are sent, so the two do not run together.";
+            return;
+        }
+
         if (!IsRunning || _media == null)
         {
             FormError = _media == null && IsRunning
@@ -806,8 +887,24 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         TallyText = !IsRunning ? "OFF" : IsLinked ? "LINKED" : "WAITING";
     }
 
+    private void ApplyJob(string? job)
+    {
+        if (job is not ("PowerPoint" or "Resolume") || Job == job)
+            return;
+        Job = job;
+        AddLog(job == "Resolume"
+            ? "Resolume only. PowerPoint sync will not run."
+            : "PowerPoint sync. Resolume clips will not be sent or received.");
+    }
+
     private void UpdateRoleHelp()
     {
+        if (IsResolume)
+        {
+            RoleHelp = "PowerPoint sync is off. Arrow keys, mouse, and slides stay on this laptop. This link only carries Resolume clips.";
+            return;
+        }
+
         RoleHelp = Role switch
         {
             "Backup" => "Leave outgoing IP blank. The show laptop connects here. If that laptop dies, keep presenting on this one — it is already on the same slide.",
@@ -832,6 +929,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _blackCommand.RaiseCanExecuteChanged();
         _sendContentCommand.RaiseCanExecuteChanged();
         SetRoleCommand.RaiseCanExecuteChanged();
+        SetJobCommand.RaiseCanExecuteChanged();
     }
 
     private void Load()
@@ -851,6 +949,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         FollowSlides = settings.FollowSlides;
         AcceptKeyboard = settings.AcceptKeyboard;
         AcceptMouse = settings.AcceptMouse;
+        Job = settings.Job == "Resolume" ? "Resolume" : "PowerPoint";
         ResolumePortText = settings.ResolumePort is < 1 or > 65535 ? "8080" : settings.ResolumePort.ToString();
         LayerText = settings.Layer < 1 ? "1" : settings.Layer.ToString();
         ClipText = settings.Clip < 1 ? "1" : settings.Clip.ToString();
@@ -883,6 +982,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             RemotePort = remote == 0 ? 24710 : remote,
             Channel = Channel,
             Role = Role,
+            Job = Job,
             SendKeyboard = SendKeyboard,
             SendAllKeys = SendAllKeys,
             SendMouseClicks = SendMouseClicks,

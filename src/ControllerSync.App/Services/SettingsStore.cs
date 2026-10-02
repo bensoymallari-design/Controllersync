@@ -10,6 +10,7 @@ public sealed class AppSettings
     public int RemotePort { get; set; } = 24710;
     public string Channel { get; set; } = "show";
     public string Role { get; set; } = "Primary";
+    public string Job { get; set; } = "PowerPoint";
     public bool SendKeyboard { get; set; } = true;
     public bool SendAllKeys { get; set; }
     public bool SendMouseClicks { get; set; } = true;
