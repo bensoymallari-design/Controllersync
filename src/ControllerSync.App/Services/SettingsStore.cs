@@ -10,6 +10,7 @@ public sealed class AppSettings
     public int RemotePort { get; set; } = 24710;
     public string Channel { get; set; } = "show";
     public string Role { get; set; } = "Primary";
+    public string Job { get; set; } = "PowerPoint";
     public bool SendKeyboard { get; set; } = true;
     public bool SendAllKeys { get; set; }
     public bool SendMouseClicks { get; set; } = true;
@@ -18,6 +19,17 @@ public sealed class AppSettings
     public bool FollowSlides { get; set; }
     public bool AcceptKeyboard { get; set; }
     public bool AcceptMouse { get; set; }
+    public int ResolumePort { get; set; } = 8080;
+    public int Layer { get; set; } = 1;
+    public int Clip { get; set; } = 1;
+    public bool PlayAfterLoad { get; set; } = true;
+    public bool LoadOnThisLaptop { get; set; } = true;
+    public string ExtraLaptops { get; set; } = "";
+    public string ContentPath { get; set; } = "";
+    public string ContentWidth { get; set; } = "";
+    public string ContentHeight { get; set; } = "";
+    public string ContentX { get; set; } = "";
+    public string ContentY { get; set; } = "";
 }
 
 public static class SettingsStore

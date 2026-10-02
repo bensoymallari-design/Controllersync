@@ -6,7 +6,7 @@
     <AssemblyName>ControllerSync</AssemblyName>
     <Version>1.0.0</Version>
     <Product>ControllerSync</Product>
-    <Description>Local-network backup for PowerPoint.</Description>
+    <Description>Local-network backup for PowerPoint and Resolume clips.</Description>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>

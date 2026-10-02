@@ -16,7 +16,20 @@ Nothing is sent to the internet. Traffic stays between the two laptops.
 6. Open the slideshow on both laptops, then click the slideshow on the show laptop. Arrow keys, space, Page Up, Page Down, Enter, Home, End, F5, Shift+F5, Escape, B, and W are sent across.
 7. If the show laptop dies, click the slideshow on the backup and keep going. It is already on the same slide.
 
-Open the firewall on the laptop that receives the connection (the backup, in the normal setup). The **Open firewall port** button asks Windows for permission. Outgoing connections are usually allowed already.
+Open the firewall on the laptop that receives the connection (the backup, in the normal setup). The **Open firewall ports** button asks Windows for permission for the show link and for the next port, which carries Resolume clips. Outgoing connections are usually allowed already.
+
+## Resolume clips
+
+Use the **Resolume** tab when the same video or picture has to land in the same layer and clip on every laptop. If the show laptop dies, the backups already have the file on their own disks.
+
+1. On every laptop, choose **Resolume** at the top. PowerPoint sync stays off in that mode, so arrow keys, mouse, and slides are not sent. Stop the link before switching jobs.
+2. On every laptop, open Resolume and turn on **Preferences → Web Server**. Leave the port at `8080` unless you changed it, and put that number in **Resolume port**.
+3. Start the link on every laptop. Each app then listens for clips on the next port (`24710` listens for clips on `24711`). A laptop left on PowerPoint will not take the clip.
+4. On the laptop that has the file, choose it, set the **layer** and **clip** (these match the numbers in Resolume, starting at 1). **Width**, **height**, **X**, and **Y** are optional pixels. Leave a box empty to keep the value already in Resolume. Filled boxes are applied after the file opens and before playback starts. Then choose **Send to every laptop**.
+5. The outgoing IP is included. For a third or fourth backup, add one IP per line under **More backup laptops**. If that laptop uses a different incoming port, write `192.168.1.22:24712`.
+6. **Start playback after load** connects the clip after Resolume opens it. **Also load on this laptop** does the same thing in the Resolume running on the machine you sent from.
+
+The file is copied to each laptop and saved in a `media` folder next to that laptop's settings. Resolume is then told to open that local file. A path on the sending laptop cannot be opened by Resolume on another machine.
 
 To try it on one computer, run two copies. Give the second copy a different incoming port, such as `24711`, so they do not fight over `24710`. Point the primary's outgoing IP at `127.0.0.1` and the backup's incoming port. Add `--settings=/path/to/folder` if both copies are the same file and you want each one to keep its own settings.
 
