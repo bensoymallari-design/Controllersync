@@ -131,6 +131,40 @@ public class MediaTransferTests
     }
 
     [Fact]
+    public async Task Cancelling_a_sent_clip_clears_it_and_deletes_only_that_file()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "cs-media-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var keep = Path.Combine(directory, "keep.mp4");
+        var drop = Path.Combine(directory, "intro-2.mp4");
+        File.WriteAllBytes(keep, new byte[] { 1 });
+        File.WriteAllBytes(drop, new byte[] { 2 });
+        var outside = Path.Combine(Path.GetTempPath(), "cs-outside-" + Guid.NewGuid().ToString("N") + ".mp4");
+        File.WriteAllBytes(outside, new byte[] { 3 });
+
+        MediaHeader? cleared = null;
+        await using var server = new MediaServer(directory, "show", afterClear: (header, _) =>
+        {
+            cleared = header;
+            return Task.FromResult("Cleared layer 2, clip 4.");
+        });
+        await server.StartAsync("127.0.0.1", 0);
+
+        var receipt = await MediaClient.ClearAsync("127.0.0.1", server.BoundPort, "show", 2, 4, "intro-2.mp4");
+        Assert.True(receipt.Ok);
+        Assert.Contains("Removed the saved file", receipt.Detail);
+        Assert.False(File.Exists(drop));
+        Assert.True(File.Exists(keep));
+        Assert.Equal(2, cleared!.Layer);
+        Assert.Equal(4, cleared.Clip);
+
+        var escaped = await MediaClient.ClearAsync("127.0.0.1", server.BoundPort, "show", 2, 5, outside);
+        Assert.True(escaped.Ok);
+        Assert.True(File.Exists(outside));
+        File.Delete(outside);
+    }
+
+    [Fact]
     public void Size_and_position_accept_pixels_and_blank_boxes()
     {
         Assert.True(ResolumePlacement.TryParse("", "", "", "", out var empty, out var error));

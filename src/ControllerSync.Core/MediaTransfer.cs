@@ -17,7 +17,8 @@ public sealed record MediaHeader(
     double? Width = null,
     double? Height = null,
     double? X = null,
-    double? Y = null)
+    double? Y = null,
+    bool Clear = false)
 {
     public ClipFrame Frame => new(Width, Height, X, Y);
 }
@@ -162,17 +163,23 @@ public sealed class MediaServer : IAsyncDisposable
     private readonly string _directory;
     private readonly string _channel;
     private readonly Func<MediaHeader, string, CancellationToken, Task<string>>? _afterSave;
+    private readonly Func<MediaHeader, CancellationToken, Task<string>>? _afterClear;
     private readonly object _place = new();
     private TcpListener? _listener;
     private CancellationTokenSource? _cts;
     private Task? _accept;
     private int _disposed;
 
-    public MediaServer(string directory, string channel, Func<MediaHeader, string, CancellationToken, Task<string>>? afterSave = null)
+    public MediaServer(
+        string directory,
+        string channel,
+        Func<MediaHeader, string, CancellationToken, Task<string>>? afterSave = null,
+        Func<MediaHeader, CancellationToken, Task<string>>? afterClear = null)
     {
         _directory = directory;
         _channel = channel;
         _afterSave = afterSave;
+        _afterClear = afterClear;
     }
 
     public int BoundPort { get; private set; }
@@ -291,6 +298,28 @@ public sealed class MediaServer : IAsyncDisposable
                     return;
                 }
 
+                if (header.Clear)
+                {
+                    var clearDetail = "Cleared layer " + header.Layer + ", clip " + header.Clip + ".";
+                    if (_afterClear != null)
+                        clearDetail = await _afterClear(header, cancellationToken).ConfigureAwait(false);
+                    if (!clearDetail.StartsWith("Cleared", StringComparison.Ordinal))
+                    {
+                        await WriteReceipt(stream, new MediaReceipt(false, "", clearDetail), cancellationToken).ConfigureAwait(false);
+                        return;
+                    }
+
+                    if (!TryDeleteSaved(header.FileName, out var removedNote, out var deleteError))
+                    {
+                        await WriteReceipt(stream, new MediaReceipt(false, "", clearDetail + " " + deleteError), cancellationToken).ConfigureAwait(false);
+                        return;
+                    }
+
+                    clearDetail += removedNote;
+                    await WriteReceipt(stream, new MediaReceipt(true, "", clearDetail), cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+
                 if (header.TotalBytes is <= 0 or > MediaNames.MaxBytes)
                 {
                     await WriteReceipt(stream, new MediaReceipt(false, "", "That file is empty or larger than 8 GB."), cancellationToken).ConfigureAwait(false);
@@ -353,6 +382,39 @@ public sealed class MediaServer : IAsyncDisposable
                     }
                 }
             }
+        }
+    }
+
+    private bool TryDeleteSaved(string? fileName, out string removedNote, out string? error)
+    {
+        removedNote = "";
+        error = null;
+        if (string.IsNullOrWhiteSpace(fileName))
+            return true;
+
+        var safe = MediaNames.SafeFileName(fileName);
+        var path = Path.GetFullPath(Path.Combine(_directory, safe));
+        var root = Path.GetFullPath(_directory);
+        var prefix = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            error = "That file is outside the media folder.";
+            return false;
+        }
+
+        if (!File.Exists(path))
+            return true;
+
+        try
+        {
+            File.Delete(path);
+            removedNote = " Removed the saved file.";
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = "The saved file stayed in the media folder. " + ex.Message;
+            return false;
         }
     }
 
@@ -490,6 +552,37 @@ public static class MediaClient
         }
 
         await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        var response = await MediaFrames.ReadAsync(stream, cancellationToken).ConfigureAwait(false);
+        return JsonSerializer.Deserialize<MediaReceipt>(response, Json)
+            ?? new MediaReceipt(false, "", "The other laptop did not answer.");
+    }
+
+    public static async Task<MediaReceipt> ClearAsync(
+        string host,
+        int port,
+        string channel,
+        int layer,
+        int clip,
+        string? savedFileName,
+        CancellationToken cancellationToken = default)
+    {
+        using var client = new TcpClient();
+        using var connectTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        connectTimeout.CancelAfter(TimeSpan.FromSeconds(4));
+        await client.ConnectAsync(host, port, connectTimeout.Token).ConfigureAwait(false);
+        client.NoDelay = true;
+        var stream = client.GetStream();
+        var header = new MediaHeader(
+            savedFileName ?? "",
+            0,
+            "",
+            layer,
+            clip,
+            false,
+            channel,
+            Clear: true);
+        var headerBytes = JsonSerializer.SerializeToUtf8Bytes(header, Json);
+        await MediaFrames.WriteAsync(stream, headerBytes, cancellationToken).ConfigureAwait(false);
         var response = await MediaFrames.ReadAsync(stream, cancellationToken).ConfigureAwait(false);
         return JsonSerializer.Deserialize<MediaReceipt>(response, Json)
             ?? new MediaReceipt(false, "", "The other laptop did not answer.");

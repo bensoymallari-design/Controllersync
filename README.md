@@ -33,6 +33,8 @@ Each file is copied to each laptop and saved in a `media` folder next to that la
 
 Sending the same filename again does not overwrite the copy Resolume may already have open. The new copy is saved as `intro-2.mp4`, then `intro-3.mp4`, and that new file is what Resolume opens. The clip slot is cleared first so the new file replaces what was there.
 
+**Cancel** on a file takes that video off the list. If the file was already sent, Cancel clears that clip in Resolume on every laptop and deletes the saved copy from that laptop's media folder. The other files in the send stay.
+
 To try it on one computer, run two copies. Give the second copy a different incoming port, such as `24711`, so they do not fight over `24710`. Point the primary's outgoing IP at `127.0.0.1` and the backup's incoming port. Add `--settings=/path/to/folder` if both copies are the same file and you want each one to keep its own settings.
 
 ## What is synced

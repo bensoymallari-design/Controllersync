@@ -7,6 +7,8 @@ namespace ControllerSync.App.Services;
 public interface IResolumeLoader
 {
     Task<string> OpenAsync(string absolutePath, int layer, int clip, bool play, int port, ClipFrame? frame, CancellationToken cancellationToken);
+
+    Task<string> ClearAsync(int layer, int clip, int port, CancellationToken cancellationToken);
 }
 
 public sealed class ResolumeLoader : IResolumeLoader
@@ -119,6 +121,30 @@ public sealed class ResolumeLoader : IResolumeLoader
             return " Could not set " + string.Join(", ", problems) + ".";
         var described = frame.Describe();
         return described.Length == 0 ? "" : " Placed " + described + ".";
+    }
+
+    public async Task<string> ClearAsync(int layer, int clip, int port, CancellationToken cancellationToken)
+    {
+        if (port is < 1 or > 65535)
+            return "Resolume port must be from 1 to 65535.";
+        if (layer < 1 || clip < 1)
+            return "Layer and clip start at 1, matching the numbers in Resolume.";
+
+        try
+        {
+            using var cleared = await PostTextAsync(ResolumeAddress.ClearUrl(port, layer, clip), "1", cancellationToken).ConfigureAwait(false);
+            if (!cleared.IsSuccessStatusCode)
+            {
+                var text = await cleared.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                return "Resolume did not clear layer " + layer + ", clip " + clip + " (" + (int)cleared.StatusCode + "). " + Trim(text);
+            }
+        }
+        catch (Exception ex)
+        {
+            return "Resolume did not answer on port " + port + ". In Resolume, open Preferences, Web Server, and turn it on. " + ex.Message;
+        }
+
+        return "Cleared layer " + layer + ", clip " + clip + ".";
     }
 
     private async Task ClearSlotAsync(int port, int layer, int clip, CancellationToken cancellationToken)

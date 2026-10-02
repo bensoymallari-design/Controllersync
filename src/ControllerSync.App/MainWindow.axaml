@@ -146,9 +146,23 @@
                   <TextBlock Foreground="#E0A23A" Text="Clip sending is off while PowerPoint sync is on. Stop the link and choose Resolume. Every laptop that should take the clip must be on Resolume too." TextWrapping="Wrap" IsVisible="{Binding IsPowerPoint}"/>
                   <TextBlock Classes="muted" Text="Start the link on this laptop and on every backup first. Choose one file or several. One send copies them onto each machine and loads them in that laptop's Resolume. The first file uses the layer and clip below. Each next file uses the next clip. Sending a file that is already in the media folder saves a new copy and loads that copy, so Resolume opens it again. PowerPoint keys and slides are not used. In Resolume, open Preferences, Web Server, and turn it on. The usual port is 8080."/>
                   <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                    <TextBox Classes="mono" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="88" Watermark="C:\Shows\intro.mp4" Text="{Binding ContentPath}"/>
+                    <TextBox Classes="mono" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="72" Watermark="C:\Shows\intro.mp4" Text="{Binding ContentPath}"/>
                     <Button Grid.Column="1" Classes="quiet" Content="Browse" Command="{Binding PickContentCommand}" MinWidth="110" VerticalAlignment="Top"/>
                   </Grid>
+                  <TextBlock Classes="muted" Text="Cancel removes that video. If it was already sent, Cancel clears it in Resolume and deletes the saved copy on each laptop."/>
+                  <ItemsControl ItemsSource="{Binding ChosenClips}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:ContentClip">
+                        <Grid ColumnDefinitions="*,Auto" Margin="0,4,0,0">
+                          <StackPanel Spacing="2" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding FileName}" FontWeight="Bold" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock Classes="muted" Text="{Binding Status}" FontSize="12"/>
+                          </StackPanel>
+                          <Button Grid.Column="1" Classes="quiet" Content="Cancel" Command="{Binding CancelCommand}" MinWidth="90" Margin="8,0,0,0"/>
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
                   <Grid ColumnDefinitions="120,120,160" ColumnSpacing="8">
                     <StackPanel Spacing="4">
                       <TextBlock Classes="label" Text="LAYER"/>
