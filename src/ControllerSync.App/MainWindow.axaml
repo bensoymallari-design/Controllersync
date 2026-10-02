@@ -1,0 +1,133 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:ControllerSync.App.ViewModels"
+        x:Class="ControllerSync.App.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Title="ControllerSync"
+        Width="1080"
+        Height="860"
+        MinWidth="920"
+        MinHeight="700"
+        Background="#12140E"
+        WindowStartupLocation="CenterScreen">
+  <Grid Margin="28" RowDefinitions="Auto,Auto,*,Auto" RowSpacing="16">
+    <Grid ColumnDefinitions="*,Auto">
+      <StackPanel Spacing="4">
+        <TextBlock Classes="h1" Text="CONTROLLERSYNC"/>
+        <TextBlock Classes="muted" Text="Local-network backup for PowerPoint. Same idea as OSC in Resolume: set the outgoing IP and the incoming IP so the two laptops can talk."/>
+        <TextBlock Classes="muted" Text="{Binding MachineName, StringFormat='This laptop: {0}'}"/>
+      </StackPanel>
+      <Border Grid.Column="1" Classes="tally" Classes.live="{Binding IsRunning}" Classes.up="{Binding IsLinked}" VerticalAlignment="Top" Margin="20,0,0,0">
+        <StackPanel Spacing="2">
+          <TextBlock Classes="label" Text="LINK"/>
+          <TextBlock Text="{Binding TallyText}" FontSize="22" FontWeight="Bold"/>
+          <TextBlock Classes="muted" Text="{Binding LinkDetail}" FontSize="12" MaxWidth="220"/>
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <StackPanel Grid.Row="1" Spacing="10">
+      <Grid ColumnDefinitions="*,*,*" ColumnSpacing="10">
+        <Button Classes="role" Classes.selected="{Binding IsPrimary}" Command="{Binding SetRoleCommand}" CommandParameter="Primary">
+          <StackPanel Spacing="2">
+            <TextBlock Text="Primary" FontWeight="Bold" FontSize="16"/>
+            <TextBlock Text="Show laptop" FontSize="12" Foreground="#A7A094"/>
+          </StackPanel>
+        </Button>
+        <Button Grid.Column="1" Classes="role" Classes.selected="{Binding IsBackup}" Command="{Binding SetRoleCommand}" CommandParameter="Backup">
+          <StackPanel Spacing="2">
+            <TextBlock Text="Backup" FontWeight="Bold" FontSize="16"/>
+            <TextBlock Text="Follows the show" FontSize="12" Foreground="#A7A094"/>
+          </StackPanel>
+        </Button>
+        <Button Grid.Column="2" Classes="role" Classes.selected="{Binding IsTwoWay}" Command="{Binding SetRoleCommand}" CommandParameter="TwoWay">
+          <StackPanel Spacing="2">
+            <TextBlock Text="Two-way" FontWeight="Bold" FontSize="16"/>
+            <TextBlock Text="Either laptop leads" FontSize="12" Foreground="#A7A094"/>
+          </StackPanel>
+        </Button>
+      </Grid>
+      <TextBlock Classes="muted" Text="{Binding RoleHelp}"/>
+    </StackPanel>
+
+    <ScrollViewer Grid.Row="2">
+      <StackPanel Spacing="14">
+        <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+          <Border Classes="card">
+            <StackPanel Spacing="8">
+              <TextBlock Classes="label" Text="INCOMING  ·  THIS LAPTOP"/>
+              <TextBlock Classes="muted" Text="The address this laptop listens on. 0.0.0.0 means every network port on this machine."/>
+              <Grid ColumnDefinitions="*,110" ColumnSpacing="8">
+                <TextBox Classes="mono" Watermark="0.0.0.0" Text="{Binding BindAddress}" IsEnabled="{Binding !IsRunning}"/>
+                <TextBox Grid.Column="1" Classes="mono" Watermark="24710" Text="{Binding ListenPortText}" IsEnabled="{Binding !IsRunning}"/>
+              </Grid>
+              <TextBlock Classes="label" Text="THIS LAPTOP'S IP" Margin="0,6,0,0"/>
+              <TextBlock Text="{Binding ThisLaptopIp}" FontFamily="Consolas, DejaVu Sans Mono, monospace" FontSize="20" FontWeight="Bold"/>
+              <TextBlock Classes="muted" Text="{Binding ThisLaptopHint}"/>
+              <Button Classes="quiet" Content="Copy IP" Command="{Binding CopyIpCommand}" HorizontalAlignment="Left"/>
+            </StackPanel>
+          </Border>
+          <Border Grid.Column="1" Classes="card">
+            <StackPanel Spacing="8">
+              <TextBlock Classes="label" Text="OUTGOING  ·  OTHER LAPTOP"/>
+              <TextBlock Classes="muted" Text="Where cues are sent. On the backup laptop this can stay empty."/>
+              <Grid ColumnDefinitions="*,110" ColumnSpacing="8">
+                <TextBox Classes="mono" Watermark="192.168.1.20" Text="{Binding RemoteAddress}" IsEnabled="{Binding !IsRunning}"/>
+                <TextBox Grid.Column="1" Classes="mono" Watermark="24710" Text="{Binding RemotePortText}" IsEnabled="{Binding !IsRunning}"/>
+              </Grid>
+              <TextBlock Classes="label" Text="CHANNEL" Margin="0,6,0,0"/>
+              <TextBox Classes="mono" Watermark="show" Text="{Binding Channel}" IsEnabled="{Binding !IsRunning}"/>
+              <TextBlock Classes="muted" Text="Both laptops must use the same channel, or they will ignore each other."/>
+            </StackPanel>
+          </Border>
+        </Grid>
+
+        <Border Classes="card">
+          <StackPanel Spacing="4">
+            <TextBlock Classes="label" Text="WHAT TO SYNC"/>
+            <TextBlock Classes="muted" Text="Presentation keys are arrows, space, Page Up and Down, Enter, Home, End, F5, Escape, B, and W. Other keys stay on this laptop unless you opt in."/>
+            <WrapPanel>
+              <CheckBox Content="Presentation keys" IsChecked="{Binding SendKeyboard}" IsEnabled="{Binding !IsRunning}" Margin="0,4,18,4"/>
+              <CheckBox Content="Mouse clicks" IsChecked="{Binding SendMouseClicks}" IsEnabled="{Binding !IsRunning}" Margin="0,4,18,4"/>
+              <CheckBox Content="Mouse movement" IsChecked="{Binding SendMouseMove}" IsEnabled="{Binding !IsRunning}" Margin="0,4,18,4"/>
+              <CheckBox Content="Every key" IsChecked="{Binding SendAllKeys}" IsEnabled="{Binding !IsRunning}" Margin="0,4,18,4"/>
+              <CheckBox Content="Publish slide position" IsChecked="{Binding PublishSlides}" IsEnabled="{Binding !IsRunning}" Margin="0,4,18,4"/>
+              <CheckBox Content="Follow the other laptop" IsChecked="{Binding FollowSlides}" IsEnabled="{Binding !IsRunning}" Margin="0,4,18,4"/>
+            </WrapPanel>
+            <TextBlock Foreground="#E07A5F" Text="Every key includes passwords. Leave that off on a show laptop." IsVisible="{Binding SendAllKeys}"/>
+            <TextBlock Classes="muted" Text="Mouse movement is off by default. Slide changes do not need it, and it fills the link." IsVisible="{Binding SendMouseMove}"/>
+          </StackPanel>
+        </Border>
+
+        <StackPanel Spacing="8">
+          <WrapPanel>
+            <Button Classes="go" Content="Start link" Command="{Binding StartCommand}" Margin="0,0,8,8"/>
+            <Button Classes="stop" Content="Stop" Command="{Binding StopCommand}" Margin="0,0,8,8"/>
+            <Button Classes="quiet" Content="Send previous" Command="{Binding PreviousCommand}" Margin="0,0,8,8"/>
+            <Button Classes="quiet" Content="Send next" Command="{Binding NextCommand}" Margin="0,0,8,8"/>
+            <Button Classes="quiet" Content="Send black" Command="{Binding BlackCommand}" Margin="0,0,8,8"/>
+            <Button Classes="quiet" Content="Open firewall port" Command="{Binding FirewallCommand}" Margin="0,0,8,8" IsVisible="{Binding IsWindows}"/>
+          </WrapPanel>
+          <TextBlock Foreground="#E07A5F" Text="{Binding FormError}" TextWrapping="Wrap" IsVisible="{Binding HasError}"/>
+        </StackPanel>
+
+        <Border Classes="banner">
+          <StackPanel Spacing="2">
+            <TextBlock Classes="label" Text="LAST CUE FROM THE OTHER LAPTOP"/>
+            <TextBlock Text="{Binding Banner}" FontSize="54" FontWeight="Bold" LetterSpacing="1"/>
+          </StackPanel>
+        </Border>
+
+        <Border Classes="card" Padding="0">
+          <DockPanel>
+            <TextBlock DockPanel.Dock="Top" Classes="label" Text="ACTIVITY" Margin="18,14,18,8"/>
+            <ListBox x:Name="LogList" ItemsSource="{Binding LogLines}" Background="#10120C" BorderThickness="0" MinHeight="160" MaxHeight="220"
+                     FontFamily="Consolas, DejaVu Sans Mono, monospace" FontSize="13" Foreground="#D9D3C5"/>
+          </DockPanel>
+        </Border>
+      </StackPanel>
+    </ScrollViewer>
+
+    <TextBlock Grid.Row="3" Classes="muted" Text="Open the same PowerPoint file on both laptops before the show. If the primary laptop dies, the backup is already on that slide — click its slideshow and keep going. Nothing is sent to the internet."/>
+  </Grid>
+</Window>
