@@ -25,6 +25,10 @@ public sealed class AppSettings
     public bool LoadOnThisLaptop { get; set; } = true;
     public string ExtraLaptops { get; set; } = "";
     public string ContentPath { get; set; } = "";
+    public string ContentWidth { get; set; } = "";
+    public string ContentHeight { get; set; } = "";
+    public string ContentX { get; set; } = "";
+    public string ContentY { get; set; } = "";
 }
 
 public static class SettingsStore

@@ -57,6 +57,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private bool _playAfterLoad = true;
     private bool _loadOnThisLaptop = true;
     private string _extraLaptops = "";
+    private string _contentWidth = "";
+    private string _contentHeight = "";
+    private string _contentX = "";
+    private string _contentY = "";
     private bool _isSending;
     private double _contentProgress;
     private string _contentStatus = "";
@@ -338,6 +342,30 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         set => Set(ref _extraLaptops, value, save: true);
     }
 
+    public string ContentWidth
+    {
+        get => _contentWidth;
+        set => Set(ref _contentWidth, value.Trim(), save: true);
+    }
+
+    public string ContentHeight
+    {
+        get => _contentHeight;
+        set => Set(ref _contentHeight, value.Trim(), save: true);
+    }
+
+    public string ContentX
+    {
+        get => _contentX;
+        set => Set(ref _contentX, value.Trim(), save: true);
+    }
+
+    public string ContentY
+    {
+        get => _contentY;
+        set => Set(ref _contentY, value.Trim(), save: true);
+    }
+
     public bool IsSending
     {
         get => _isSending;
@@ -508,7 +536,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var media = new MediaServer(directory, endpoints.Channel, async (header, path, token) =>
         {
             var port = CurrentResolumePort();
-            var loaded = await _resolume.OpenAsync(path, header.Layer, header.Clip, header.Play, port, token).ConfigureAwait(false);
+            var loaded = await _resolume.OpenAsync(path, header.Layer, header.Clip, header.Play, port, header.Frame, token).ConfigureAwait(false);
             var detail = loaded + " Saved at " + path + ".";
             Ui(() => AddLog(detail));
             return detail;
@@ -586,6 +614,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             return;
         }
 
+        if (!ResolumePlacement.TryParse(ContentWidth, ContentHeight, ContentX, ContentY, out var frame, out var frameError) || frame == null)
+        {
+            FormError = frameError ?? "Check the size and position.";
+            return;
+        }
+
         if (!int.TryParse(RemotePortText, out var remotePort) || remotePort is < 1 or > 65534)
             remotePort = 24710;
         var targets = MediaNames.Targets(RemoteAddress, remotePort, ExtraLaptops);
@@ -601,7 +635,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var failures = new List<string>();
         try
         {
-            AddLog("Sending " + Path.GetFileName(ContentPath) + " to layer " + layer + ", clip " + clip + ".");
+            var place = frame.Describe();
+            AddLog("Sending " + Path.GetFileName(ContentPath) + " to layer " + layer + ", clip " + clip + (place.Length == 0 ? "." : ", " + place + "."));
             var index = 0;
             foreach (var target in targets)
             {
@@ -619,6 +654,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                         layer,
                         clip,
                         PlayAfterLoad,
+                        frame,
                         progress);
                     AddLog(target.Host + ": " + receipt.Detail);
                     if (!receipt.Ok)
@@ -635,7 +671,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             if (LoadOnThisLaptop)
             {
                 ContentStatus = "Loading on this laptop...";
-                var local = await _resolume.OpenAsync(ContentPath, layer, clip, PlayAfterLoad, resolumePort, CancellationToken.None);
+                var local = await _resolume.OpenAsync(ContentPath, layer, clip, PlayAfterLoad, resolumePort, frame, CancellationToken.None);
                 AddLog(local);
                 if (!local.StartsWith("Loaded", StringComparison.Ordinal))
                     failures.Add(local);
@@ -822,6 +858,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         LoadOnThisLaptop = settings.LoadOnThisLaptop;
         ExtraLaptops = settings.ExtraLaptops ?? "";
         ContentPath = settings.ContentPath ?? "";
+        ContentWidth = settings.ContentWidth ?? "";
+        ContentHeight = settings.ContentHeight ?? "";
+        ContentX = settings.ContentX ?? "";
+        ContentY = settings.ContentY ?? "";
         Role = string.IsNullOrWhiteSpace(settings.Role) ? "Primary" : settings.Role;
         _loading = false;
     }
@@ -857,7 +897,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             PlayAfterLoad = PlayAfterLoad,
             LoadOnThisLaptop = LoadOnThisLaptop,
             ExtraLaptops = ExtraLaptops,
-            ContentPath = ContentPath
+            ContentPath = ContentPath,
+            ContentWidth = ContentWidth,
+            ContentHeight = ContentHeight,
+            ContentX = ContentX,
+            ContentY = ContentY
         });
     }
 

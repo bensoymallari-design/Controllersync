@@ -147,6 +147,26 @@
                       <TextBox Classes="mono" Watermark="8080" Text="{Binding ResolumePortText}"/>
                     </StackPanel>
                   </Grid>
+                  <TextBlock Classes="label" Text="SIZE AND POSITION" Margin="0,6,0,0"/>
+                  <TextBlock Classes="muted" Text="Pixels, the same numbers Resolume shows for the clip. Leave a box empty to keep the value already there. Width and height stretch the clip to that size. X and Y are Position X and Position Y. They are applied after the file opens and before playback starts."/>
+                  <Grid ColumnDefinitions="120,120,120,120" ColumnSpacing="8">
+                    <StackPanel Spacing="4">
+                      <TextBlock Classes="label" Text="WIDTH"/>
+                      <TextBox Classes="mono" Watermark="1920" Text="{Binding ContentWidth}"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Spacing="4">
+                      <TextBlock Classes="label" Text="HEIGHT"/>
+                      <TextBox Classes="mono" Watermark="1080" Text="{Binding ContentHeight}"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" Spacing="4">
+                      <TextBlock Classes="label" Text="X"/>
+                      <TextBox Classes="mono" Watermark="0" Text="{Binding ContentX}"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="3" Spacing="4">
+                      <TextBlock Classes="label" Text="Y"/>
+                      <TextBox Classes="mono" Watermark="0" Text="{Binding ContentY}"/>
+                    </StackPanel>
+                  </Grid>
                   <WrapPanel>
                     <CheckBox Content="Start playback after load" IsChecked="{Binding PlayAfterLoad}" Margin="0,4,18,4"/>
                     <CheckBox Content="Also load on this laptop" IsChecked="{Binding LoadOnThisLaptop}" Margin="0,4,18,4"/>

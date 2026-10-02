@@ -24,7 +24,7 @@ Use the **Resolume** tab when the same video or picture has to land in the same 
 
 1. On every laptop, open Resolume and turn on **Preferences → Web Server**. Leave the port at `8080` unless you changed it, and put that number in **Resolume port**.
 2. Start the link on every laptop, the same way as a PowerPoint backup. Each app then listens for clips on the next port (`24710` listens for clips on `24711`).
-3. On the laptop that has the file, choose it, set the **layer** and **clip** (these match the numbers in Resolume, starting at 1), and choose **Send to every laptop**.
+3. On the laptop that has the file, choose it, set the **layer** and **clip** (these match the numbers in Resolume, starting at 1). **Width**, **height**, **X**, and **Y** are optional pixels. Leave a box empty to keep the value already in Resolume. Filled boxes are applied after the file opens and before playback starts. Then choose **Send to every laptop**.
 4. The outgoing IP is included. For a third or fourth backup, add one IP per line under **More backup laptops**. If that laptop uses a different incoming port, write `192.168.1.22:24712`.
 5. **Start playback after load** connects the clip after Resolume opens it. **Also load on this laptop** does the same thing in the Resolume running on the machine you sent from.
 

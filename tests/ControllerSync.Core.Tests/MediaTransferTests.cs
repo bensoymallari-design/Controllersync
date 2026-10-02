@@ -89,4 +89,95 @@ public class MediaTransferTests
         Assert.Contains("damaged", receipt.Detail, StringComparison.OrdinalIgnoreCase);
         Assert.False(File.Exists(Path.Combine(directory, "intro.mp4")));
     }
+
+    [Fact]
+    public void Size_and_position_accept_pixels_and_blank_boxes()
+    {
+        Assert.True(ResolumePlacement.TryParse("", "", "", "", out var empty, out var error));
+        Assert.Null(error);
+        Assert.False(empty!.Any);
+
+        Assert.True(ResolumePlacement.TryParse("1920", "1080", "-40", "12,5", out var frame, out error));
+        Assert.Null(error);
+        Assert.Equal(1920, frame!.Width);
+        Assert.Equal(1080, frame.Height);
+        Assert.Equal(-40, frame.X);
+        Assert.Equal(12.5, frame.Y);
+        Assert.Equal("1920×1080, X -40, Y 12.5", frame.Describe());
+
+        Assert.False(ResolumePlacement.TryParse("0", "", "", "", out _, out error));
+        Assert.Contains("Width", error);
+        Assert.False(ResolumePlacement.TryParse("wide", "", "", "", out _, out error));
+        Assert.Contains("Width", error);
+    }
+
+    [Fact]
+    public void Clip_json_maps_size_and_position_to_resolume_parameters()
+    {
+        const string json = """
+            {
+              "video": {
+                "width": { "id": 11, "valuetype": "ParamRange", "value": 1280 },
+                "height": { "id": 12, "valuetype": "ParamRange", "value": 720 },
+                "resize": { "id": 13, "valuetype": "ParamChoice", "value": "Original" },
+                "effects": [
+                  {
+                    "name": "Transform",
+                    "params": {
+                      "Position X": { "id": 21, "valuetype": "ParamRange", "value": 0 },
+                      "Position Y": { "id": 22, "valuetype": "ParamRange", "value": 0 }
+                    }
+                  }
+                ]
+              }
+            }
+            """;
+
+        var plan = ResolumePlacement.Read(json, new ClipFrame(800, 600, 100, -20));
+        Assert.False(plan.NeedsTransform);
+        Assert.Empty(plan.Missing);
+        Assert.Equal(new long[] { 11, 12, 13, 21, 22 }, plan.Writes.Select(write => write.Id));
+        Assert.Contains("\"value\":800", plan.Writes[0].Body);
+        Assert.Contains("\"value\":\"Stretch\"", plan.Writes[2].Body);
+        Assert.Contains("\"value\":-20", plan.Writes[4].Body);
+    }
+
+    [Fact]
+    public void Position_asks_for_a_transform_effect_when_the_clip_has_none()
+    {
+        const string json = """
+            { "video": { "width": { "id": 11 }, "height": { "id": 12 } } }
+            """;
+        var plan = ResolumePlacement.Read(json, new ClipFrame(null, null, 10, 20));
+        Assert.True(plan.NeedsTransform);
+        Assert.Empty(plan.Writes);
+    }
+
+    [Fact]
+    public async Task Size_and_position_travel_with_the_file()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "cs-media-" + Guid.NewGuid().ToString("N"));
+        MediaHeader? seen = null;
+        await using var server = new MediaServer(directory, "show", (header, _, _) =>
+        {
+            seen = header;
+            return Task.FromResult("ok");
+        });
+        await server.StartAsync("127.0.0.1", 0);
+        var receipt = await MediaClient.SendBytesAsync(
+            "127.0.0.1",
+            server.BoundPort,
+            "show",
+            "intro.mp4",
+            new byte[] { 1, 2, 3, 4 },
+            1,
+            1,
+            false,
+            new ClipFrame(1920, 1080, 15, 30));
+        Assert.True(receipt.Ok);
+        Assert.Equal(1920, seen!.Width);
+        Assert.Equal(1080, seen.Height);
+        Assert.Equal(15, seen.X);
+        Assert.Equal(30, seen.Y);
+    }
 }

@@ -13,7 +13,14 @@ public sealed record MediaHeader(
     int Layer,
     int Clip,
     bool Play,
-    string Channel);
+    string Channel,
+    double? Width = null,
+    double? Height = null,
+    double? X = null,
+    double? Y = null)
+{
+    public ClipFrame Frame => new(Width, Height, X, Y);
+}
 
 public sealed record MediaReceipt(bool Ok, string SavedPath, string Detail);
 
@@ -91,6 +98,15 @@ public static class ResolumeAddress
 
     public static string ConnectUrl(int port, int layer, int clip) =>
         $"http://127.0.0.1:{port}/api/v1/composition/layers/{layer}/clips/{clip}/connect";
+
+    public static string ClipUrl(int port, int layer, int clip) =>
+        $"http://127.0.0.1:{port}/api/v1/composition/layers/{layer}/clips/{clip}";
+
+    public static string ParameterUrl(int port, long id) =>
+        $"http://127.0.0.1:{port}/api/v1/parameter/by-id/{id}";
+
+    public static string AddTransformUrl(int port, int layer, int clip) =>
+        $"http://127.0.0.1:{port}/api/v1/composition/layers/{layer}/clips/{clip}/effects/video/add";
 }
 
 public sealed class MediaServer : IAsyncDisposable
@@ -322,6 +338,7 @@ public static class MediaClient
         int layer,
         int clip,
         bool play,
+        ClipFrame? frame,
         IProgress<double>? progress,
         CancellationToken cancellationToken = default)
     {
@@ -337,7 +354,7 @@ public static class MediaClient
         }
 
         file.Position = 0;
-        return await SendStreamAsync(host, port, channel, Path.GetFileName(filePath), file, hash, layer, clip, play, progress, cancellationToken)
+        return await SendStreamAsync(host, port, channel, Path.GetFileName(filePath), file, hash, layer, clip, play, frame, progress, cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -350,11 +367,12 @@ public static class MediaClient
         int layer,
         int clip,
         bool play,
+        ClipFrame? frame = null,
         string? shaOverride = null,
         CancellationToken cancellationToken = default)
     {
         var hash = shaOverride ?? Convert.ToHexString(SHA256.HashData(bytes));
-        return SendStreamAsync(host, port, channel, fileName, new MemoryStream(bytes), hash, layer, clip, play, null, cancellationToken);
+        return SendStreamAsync(host, port, channel, fileName, new MemoryStream(bytes), hash, layer, clip, play, frame, null, cancellationToken);
     }
 
     private static async Task<MediaReceipt> SendStreamAsync(
@@ -367,6 +385,7 @@ public static class MediaClient
         int layer,
         int clip,
         bool play,
+        ClipFrame? frame,
         IProgress<double>? progress,
         CancellationToken cancellationToken)
     {
@@ -377,7 +396,18 @@ public static class MediaClient
         client.NoDelay = true;
         var stream = client.GetStream();
         var length = source.Length - source.Position;
-        var header = new MediaHeader(fileName, length, sha256, layer, clip, play, channel);
+        var header = new MediaHeader(
+            fileName,
+            length,
+            sha256,
+            layer,
+            clip,
+            play,
+            channel,
+            frame?.Width,
+            frame?.Height,
+            frame?.X,
+            frame?.Y);
         var headerBytes = JsonSerializer.SerializeToUtf8Bytes(header, Json);
         await MediaFrames.WriteAsync(stream, headerBytes, cancellationToken).ConfigureAwait(false);
 
