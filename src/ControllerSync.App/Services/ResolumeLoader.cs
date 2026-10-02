@@ -7,6 +7,8 @@ namespace ControllerSync.App.Services;
 public interface IResolumeLoader
 {
     Task<string> OpenAsync(string absolutePath, int layer, int clip, bool play, int port, ClipFrame? frame, CancellationToken cancellationToken);
+
+    Task<string> ClearAsync(int layer, int clip, int port, CancellationToken cancellationToken);
 }
 
 public sealed class ResolumeLoader : IResolumeLoader
@@ -20,6 +22,7 @@ public sealed class ResolumeLoader : IResolumeLoader
         if (layer < 1 || clip < 1)
             return "Layer and clip start at 1, matching the numbers in Resolume.";
 
+        await ClearSlotAsync(port, layer, clip, cancellationToken).ConfigureAwait(false);
         var uri = ResolumeAddress.FileUri(absolutePath);
         using var body = new StringContent(uri, Encoding.UTF8, "text/plain");
         HttpResponseMessage opened;
@@ -44,8 +47,17 @@ public sealed class ResolumeLoader : IResolumeLoader
 
         try
         {
-            using var connectBody = new StringContent("1", Encoding.UTF8, "text/plain");
-            using var connected = await _http.PostAsync(ResolumeAddress.ConnectUrl(port, layer, clip), connectBody, cancellationToken).ConfigureAwait(false);
+            // A slot that already played this session ignores a second connect until it is released.
+            using var released = await PostTextAsync(ResolumeAddress.ConnectUrl(port, layer, clip), "0", cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // Releasing an idle slot can fail. Connecting below still runs.
+        }
+
+        try
+        {
+            using var connected = await PostTextAsync(ResolumeAddress.ConnectUrl(port, layer, clip), "1", cancellationToken).ConfigureAwait(false);
             if (!connected.IsSuccessStatusCode)
                 return "Loaded into layer " + layer + ", clip " + clip + ". Resolume did not start playback." + placed;
         }
@@ -109,6 +121,48 @@ public sealed class ResolumeLoader : IResolumeLoader
             return " Could not set " + string.Join(", ", problems) + ".";
         var described = frame.Describe();
         return described.Length == 0 ? "" : " Placed " + described + ".";
+    }
+
+    public async Task<string> ClearAsync(int layer, int clip, int port, CancellationToken cancellationToken)
+    {
+        if (port is < 1 or > 65535)
+            return "Resolume port must be from 1 to 65535.";
+        if (layer < 1 || clip < 1)
+            return "Layer and clip start at 1, matching the numbers in Resolume.";
+
+        try
+        {
+            using var cleared = await PostTextAsync(ResolumeAddress.ClearUrl(port, layer, clip), "1", cancellationToken).ConfigureAwait(false);
+            if (!cleared.IsSuccessStatusCode)
+            {
+                var text = await cleared.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                return "Resolume did not clear layer " + layer + ", clip " + clip + " (" + (int)cleared.StatusCode + "). " + Trim(text);
+            }
+        }
+        catch (Exception ex)
+        {
+            return "Resolume did not answer on port " + port + ". In Resolume, open Preferences, Web Server, and turn it on. " + ex.Message;
+        }
+
+        return "Cleared layer " + layer + ", clip " + clip + ".";
+    }
+
+    private async Task ClearSlotAsync(int port, int layer, int clip, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var cleared = await PostTextAsync(ResolumeAddress.ClearUrl(port, layer, clip), "1", cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // An empty slot, or Resolume with the web server off, is reported by the open call.
+        }
+    }
+
+    private async Task<HttpResponseMessage> PostTextAsync(string url, string text, CancellationToken cancellationToken)
+    {
+        using var body = new StringContent(text, Encoding.UTF8, "text/plain");
+        return await _http.PostAsync(url, body, cancellationToken).ConfigureAwait(false);
     }
 
     private static string Trim(string text)

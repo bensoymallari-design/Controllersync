@@ -102,6 +102,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             return Task.CompletedTask;
         });
         PickContentCommand = new RelayCommand(PickContentAsync);
+        ChosenClips.CollectionChanged += (_, _) => Raise(nameof(HasChosenClips));
 
         Load();
         RefreshIps();
@@ -119,7 +120,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public Func<string, Task>? CopyText { get; set; }
 
-    public Func<Task<string?>>? PickFile { get; set; }
+    public Func<Task<IReadOnlyList<string>?>>? PickFile { get; set; }
 
     public string MachineName => _machineName;
     public bool IsWindows { get; } = OperatingSystem.IsWindows();
@@ -330,8 +331,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public string ContentPath
     {
         get => _contentPath;
-        set => Set(ref _contentPath, value, save: true);
+        set
+        {
+            if (!Set(ref _contentPath, value, save: true))
+                return;
+            RefreshChosenClips();
+        }
     }
+
+    public ObservableCollection<ContentClip> ChosenClips { get; } = new();
+
+    public bool HasChosenClips => ChosenClips.Count > 0;
 
     public string LayerText
     {
@@ -615,6 +625,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             var detail = loaded + " Saved at " + path + ".";
             Ui(() => AddLog(detail));
             return detail;
+        }, async (header, token) =>
+        {
+            var port = CurrentResolumePort();
+            var cleared = await _resolume.ClearAsync(header.Layer, header.Clip, port, token).ConfigureAwait(false);
+            Ui(() => AddLog(cleared));
+            return cleared;
         });
         try
         {
@@ -641,16 +657,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         if (PickFile == null)
             return;
-        var path = await PickFile();
-        if (path == null)
+        var paths = await PickFile();
+        if (paths == null)
             return;
-        if (path.Length == 0)
+        if (paths.Count == 0)
         {
-            FormError = "Choose a file that is saved on this laptop.";
+            FormError = "Choose files that are saved on this laptop.";
             return;
         }
 
-        ContentPath = path;
+        ContentPath = string.Join(Environment.NewLine, paths);
         FormError = "";
     }
 
@@ -670,9 +686,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             return;
         }
 
-        if (!File.Exists(ContentPath))
+        var files = ChosenClips.ToList();
+        if (files.Count == 0 || files.Any(clip => !File.Exists(clip.Path)))
         {
-            FormError = "Choose a video or picture that is saved on this laptop.";
+            FormError = "Choose videos or pictures that are saved on this laptop. Put one path on each line.";
+            return;
+        }
+
+        if (files.Count > 64)
+        {
+            FormError = "Send up to 64 files at a time.";
             return;
         }
 
@@ -710,66 +733,326 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             return;
         }
 
+        if (clip > 256 || clip + files.Count - 1 > 256)
+        {
+            FormError = "Keep the last clip at 256 or below. Start at a lower clip, or send fewer files.";
+            return;
+        }
+
         IsSending = true;
         FormError = "";
         ContentProgress = 0;
         var failures = new List<string>();
+        var sentCount = 0;
+        var cancelledCount = 0;
         try
         {
             var place = frame.Describe();
-            AddLog("Sending " + Path.GetFileName(ContentPath) + " to layer " + layer + ", clip " + clip + (place.Length == 0 ? "." : ", " + place + "."));
-            var index = 0;
-            foreach (var target in targets)
+            var lastClip = clip + files.Count - 1;
+            AddLog(files.Count == 1
+                ? "Sending " + files[0].FileName + " to layer " + layer + ", clip " + clip + (place.Length == 0 ? "." : ", " + place + ".")
+                : "Sending " + files.Count + " files to layer " + layer + ", clips " + clip + "–" + lastClip + (place.Length == 0 ? "." : ", " + place + "."));
+            for (var fileIndex = 0; fileIndex < files.Count; fileIndex++)
             {
-                index++;
-                ContentStatus = "Sending to " + target.Host + " (" + index + " of " + targets.Count + ")...";
-                ContentProgress = 0;
-                var progress = new Progress<double>(value => ContentProgress = value);
+                var item = files[fileIndex];
+                var fileClip = clip + fileIndex;
+                if (!ChosenClips.Contains(item))
+                {
+                    cancelledCount++;
+                    AddLog("Cancelled " + item.FileName + ".");
+                    continue;
+                }
+
+                using var sendCancel = new CancellationTokenSource();
+                item.SendCancel = sendCancel;
+                item.Status = "Sending to clip " + fileClip + "…";
+                ContentStatus = "Sending " + item.FileName + " to clip " + fileClip + " (" + (fileIndex + 1) + " of " + files.Count + ")...";
+                var progress = new Progress<double>(value => ContentProgress = (fileIndex + value) / files.Count);
+                SendResult[] results = Array.Empty<SendResult>();
                 try
                 {
-                    var receipt = await MediaClient.SendFileAsync(
-                        target.Host,
-                        target.Port,
-                        Channel,
-                        ContentPath,
-                        layer,
-                        clip,
-                        PlayAfterLoad,
-                        frame,
-                        progress);
-                    AddLog(target.Host + ": " + receipt.Detail);
-                    if (!receipt.Ok)
-                        failures.Add(target.Host + ": " + receipt.Detail);
-                }
-                catch (Exception ex)
-                {
-                    var message = target.Host + " did not receive the file. Start the link on that laptop first.";
-                    AddLog(message + " " + ex.Message);
-                    failures.Add(message);
-                }
-            }
+                    var sends = targets.Select(target => SendOneAsync(target, item.Path, layer, fileClip, frame, progress, sendCancel.Token)).ToArray();
+                    results = await Task.WhenAll(sends);
+                    if (sendCancel.IsCancellationRequested || results.Any(result => result.Cancelled))
+                    {
+                        await UndoSendAsync(item, results, layer, fileClip, resolumePort);
+                        cancelledCount++;
+                        AddLog("Cancelled " + item.FileName + ".");
+                        RemoveClip(item);
+                        continue;
+                    }
 
-            if (LoadOnThisLaptop)
-            {
-                ContentStatus = "Loading on this laptop...";
-                var local = await _resolume.OpenAsync(ContentPath, layer, clip, PlayAfterLoad, resolumePort, frame, CancellationToken.None);
-                AddLog(local);
-                if (!local.StartsWith("Loaded", StringComparison.Ordinal))
-                    failures.Add(local);
+                    var saved = new List<SavedClip>();
+                    foreach (var result in results)
+                    {
+                        if (result.Error != null)
+                        {
+                            var message = result.Target.Host + " did not receive " + item.FileName + ". Start the link on that laptop first.";
+                            AddLog(message + " " + result.Error);
+                            failures.Add(message);
+                            continue;
+                        }
+
+                        AddLog(result.Target.Host + ": " + result.Receipt!.Detail);
+                        if (!result.Receipt.Ok)
+                        {
+                            failures.Add(result.Target.Host + ": " + result.Receipt.Detail);
+                            continue;
+                        }
+
+                        var savedName = Path.GetFileName(result.Receipt.SavedPath);
+                        if (!string.IsNullOrWhiteSpace(savedName))
+                            saved.Add(new SavedClip(result.Target.Host, result.Target.Port, savedName));
+                    }
+
+                    var loadedHere = false;
+                    if (LoadOnThisLaptop && !sendCancel.IsCancellationRequested)
+                    {
+                        ContentStatus = "Loading " + item.FileName + " on this laptop...";
+                        try
+                        {
+                            var local = await _resolume.OpenAsync(item.Path, layer, fileClip, PlayAfterLoad, resolumePort, frame, sendCancel.Token);
+                            AddLog(local);
+                            loadedHere = local.StartsWith("Loaded", StringComparison.Ordinal);
+                            if (!loadedHere)
+                                failures.Add(local);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            loadedHere = false;
+                        }
+                    }
+
+                    if (sendCancel.IsCancellationRequested)
+                    {
+                        await UndoSendAsync(item, results, layer, fileClip, resolumePort);
+                        if (loadedHere)
+                            await ClearHereAsync(layer, fileClip, resolumePort);
+                        cancelledCount++;
+                        AddLog("Cancelled " + item.FileName + ".");
+                        RemoveClip(item);
+                        continue;
+                    }
+
+                    item.Saved.Clear();
+                    item.Saved.AddRange(saved);
+                    item.Layer = layer;
+                    item.Clip = fileClip;
+                    item.LoadedHere = loadedHere;
+                    item.WasSent = saved.Count > 0 || loadedHere;
+                    if (sendCancel.IsCancellationRequested)
+                    {
+                        await UndoSendAsync(item, results, layer, fileClip, resolumePort);
+                        if (loadedHere)
+                            await ClearHereAsync(layer, fileClip, resolumePort);
+                        item.WasSent = false;
+                        cancelledCount++;
+                        AddLog("Cancelled " + item.FileName + ".");
+                        RemoveClip(item);
+                        continue;
+                    }
+
+                    item.Status = item.WasSent ? "On clip " + fileClip : "Not sent";
+                    if (item.WasSent)
+                        sentCount++;
+                }
+                catch (OperationCanceledException)
+                {
+                    await UndoSendAsync(item, results, layer, fileClip, resolumePort);
+                    cancelledCount++;
+                    AddLog("Cancelled " + item.FileName + ".");
+                    RemoveClip(item);
+                }
+                finally
+                {
+                    item.SendCancel = null;
+                }
             }
 
             ContentProgress = failures.Count == 0 ? 1 : 0;
-            ContentStatus = failures.Count == 0
-                ? targets.Count == 0
-                    ? "Loaded on this laptop."
-                    : "Sent to " + targets.Count + (targets.Count == 1 ? " laptop." : " laptops.")
-                : "Finished with a problem. The activity log has the detail.";
+            ContentStatus = failures.Count > 0
+                ? "Finished with a problem. The activity log has the detail."
+                : cancelledCount > 0 && sentCount == 0
+                    ? "Cancelled."
+                    : cancelledCount > 0
+                        ? "Sent " + sentCount + ", cancelled " + cancelledCount + "."
+                        : DescribeSend(sentCount, targets.Count);
             FormError = failures.Count == 0 ? "" : failures[0];
         }
         finally
         {
             IsSending = false;
         }
+    }
+
+    private async Task CancelClipAsync(ContentClip clip)
+    {
+        if (clip.WasSent)
+        {
+            clip.SendCancel?.Cancel();
+            var cleared = await ClearSentClipAsync(clip);
+            if (!cleared)
+                return;
+            AddLog("Cancelled " + clip.FileName + " on clip " + clip.Clip + ".");
+            RemoveClip(clip);
+            return;
+        }
+
+        if (clip.SendCancel != null)
+        {
+            clip.Status = "Cancelling…";
+            clip.SendCancel.Cancel();
+            return;
+        }
+
+        var duringSend = IsSending;
+        RemoveClip(clip);
+        if (!duringSend)
+            AddLog("Removed " + clip.FileName + ".");
+    }
+
+    private async Task<bool> ClearSentClipAsync(ContentClip clip)
+    {
+        var failures = new List<string>();
+        foreach (var saved in clip.Saved.ToList())
+        {
+            try
+            {
+                var receipt = await MediaClient.ClearAsync(saved.Host, saved.Port, Channel, clip.Layer, clip.Clip, saved.FileName);
+                AddLog(saved.Host + ": " + receipt.Detail);
+                if (!receipt.Ok)
+                    failures.Add(saved.Host + ": " + receipt.Detail);
+            }
+            catch (Exception ex)
+            {
+                var message = saved.Host + " did not clear " + clip.FileName + ". Start the link on that laptop first.";
+                AddLog(message + " " + ex.Message);
+                failures.Add(message);
+            }
+        }
+
+        if (clip.LoadedHere)
+        {
+            var local = await ClearHereAsync(clip.Layer, clip.Clip, CurrentResolumePort());
+            if (!local.StartsWith("Cleared", StringComparison.Ordinal))
+                failures.Add(local);
+        }
+
+        if (failures.Count == 0)
+        {
+            FormError = "";
+            return true;
+        }
+
+        FormError = failures[0];
+        clip.Status = "Still on clip " + clip.Clip;
+        return false;
+    }
+
+    private async Task<string> ClearHereAsync(int layer, int clip, int port)
+    {
+        var cleared = await _resolume.ClearAsync(layer, clip, port, CancellationToken.None);
+        AddLog(cleared);
+        return cleared;
+    }
+
+    private async Task UndoSendAsync(ContentClip clip, SendResult[] results, int layer, int fileClip, int port)
+    {
+        foreach (var result in results)
+        {
+            if (result.Receipt is not { Ok: true })
+                continue;
+            var savedName = Path.GetFileName(result.Receipt.SavedPath);
+            try
+            {
+                var receipt = await MediaClient.ClearAsync(result.Target.Host, result.Target.Port, Channel, layer, fileClip, savedName);
+                AddLog(result.Target.Host + ": " + receipt.Detail);
+            }
+            catch (Exception ex)
+            {
+                AddLog(result.Target.Host + " kept " + clip.FileName + ". " + ex.Message);
+            }
+        }
+
+        if (clip.LoadedHere)
+            await ClearHereAsync(layer, fileClip, port);
+    }
+
+    private async Task<SendResult> SendOneAsync(
+        MediaTarget target,
+        string path,
+        int layer,
+        int clip,
+        ClipFrame frame,
+        IProgress<double> progress,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var receipt = await MediaClient.SendFileAsync(
+                target.Host,
+                target.Port,
+                Channel,
+                path,
+                layer,
+                clip,
+                PlayAfterLoad,
+                frame,
+                progress,
+                cancellationToken);
+            return new SendResult(target, receipt, null, false);
+        }
+        catch (OperationCanceledException)
+        {
+            return new SendResult(target, null, null, true);
+        }
+        catch (Exception ex)
+        {
+            return new SendResult(target, null, ex.Message, false);
+        }
+    }
+
+    private readonly record struct SendResult(MediaTarget Target, MediaReceipt? Receipt, string? Error, bool Cancelled);
+
+    private static string DescribeSend(int files, int laptops)
+    {
+        if (laptops == 0)
+            return files == 1 ? "Loaded on this laptop." : "Loaded " + files + " files on this laptop.";
+        var fileText = files == 1 ? "Sent" : "Sent " + files + " files";
+        var laptopText = laptops == 1 ? "1 laptop." : laptops + " laptops.";
+        return fileText + " to " + laptopText;
+    }
+
+    private void RemoveClip(ContentClip clip)
+    {
+        clip.WasSent = false;
+        ChosenClips.Remove(clip);
+        var remaining = MediaNames.FileList(_contentPath)
+            .Where(path => !path.Equals(clip.Path, StringComparison.OrdinalIgnoreCase));
+        ContentPath = string.Join(Environment.NewLine, remaining);
+    }
+
+    private void RefreshChosenClips()
+    {
+        var next = new List<ContentClip>();
+        foreach (var path in MediaNames.FileList(_contentPath))
+        {
+            var found = ChosenClips.FirstOrDefault(item => item.Path.Equals(path, StringComparison.OrdinalIgnoreCase));
+            next.Add(found ?? new ContentClip(path, CancelClipAsync));
+        }
+
+        foreach (var sent in ChosenClips)
+        {
+            if (sent.WasSent && next.All(item => !ReferenceEquals(item, sent)))
+                next.Add(sent);
+        }
+
+        if (next.Count == ChosenClips.Count && next.Zip(ChosenClips).All(pair => ReferenceEquals(pair.First, pair.Second)))
+            return;
+
+        ChosenClips.Clear();
+        foreach (var item in next)
+            ChosenClips.Add(item);
     }
 
     private int CurrentResolumePort() =>

@@ -25,7 +25,7 @@ public partial class MainWindow : Window
             if (clipboard != null)
                 await clipboard.SetTextAsync(text);
         };
-        viewModel.PickFile = PickContentFileAsync;
+        viewModel.PickFile = PickContentFilesAsync;
         // The log sits inside the page scroller. Let the list move to the new line,
         // then stop that request so Start stays where the user left it.
         LogList.AddHandler(RequestBringIntoViewEvent, (_, e) => e.Handled = true, RoutingStrategies.Bubble, true);
@@ -36,12 +36,12 @@ public partial class MainWindow : Window
         };
     }
 
-    private async Task<string?> PickContentFileAsync()
+    private async Task<IReadOnlyList<string>?> PickContentFilesAsync()
     {
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = "Choose a clip for Resolume",
-            AllowMultiple = false,
+            Title = "Choose clips for Resolume",
+            AllowMultiple = true,
             FileTypeFilter = new[]
             {
                 new FilePickerFileType("Video and pictures")
@@ -57,7 +57,14 @@ public partial class MainWindow : Window
         });
         if (files.Count == 0)
             return null;
-        var path = files[0].TryGetLocalPath();
-        return string.IsNullOrWhiteSpace(path) ? "" : path;
+        var paths = new List<string>();
+        foreach (var file in files)
+        {
+            var path = file.TryGetLocalPath();
+            if (!string.IsNullOrWhiteSpace(path))
+                paths.Add(path);
+        }
+
+        return paths;
     }
 }
