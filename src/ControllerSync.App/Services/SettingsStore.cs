@@ -18,6 +18,13 @@ public sealed class AppSettings
     public bool FollowSlides { get; set; }
     public bool AcceptKeyboard { get; set; }
     public bool AcceptMouse { get; set; }
+    public int ResolumePort { get; set; } = 8080;
+    public int Layer { get; set; } = 1;
+    public int Clip { get; set; } = 1;
+    public bool PlayAfterLoad { get; set; } = true;
+    public bool LoadOnThisLaptop { get; set; } = true;
+    public string ExtraLaptops { get; set; } = "";
+    public string ContentPath { get; set; } = "";
 }
 
 public static class SettingsStore

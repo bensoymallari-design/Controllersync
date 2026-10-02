@@ -19,11 +19,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly RelayCommand _previousCommand;
     private readonly RelayCommand _nextCommand;
     private readonly RelayCommand _blackCommand;
+    private readonly RelayCommand _sendContentCommand;
+    private readonly ResolumeLoader _resolume = new();
     private bool _loading;
     private bool _disposed;
     private SyncNode? _node;
     private ShowLink? _link;
     private IDisposable? _slides;
+    private MediaServer? _media;
 
     private string _bindAddress = "0.0.0.0";
     private string _listenPortText = "24710";
@@ -47,6 +50,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private string _formError = "";
     private string _roleHelp = "";
     private string _thisLaptopIp = "No address yet";
+    private string _contentPath = "";
+    private string _layerText = "1";
+    private string _clipText = "1";
+    private string _resolumePortText = "8080";
+    private bool _playAfterLoad = true;
+    private bool _loadOnThisLaptop = true;
+    private string _extraLaptops = "";
+    private bool _isSending;
+    private double _contentProgress;
+    private string _contentStatus = "";
 
     public MainViewModel()
     {
@@ -66,6 +79,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _previousCommand = new RelayCommand(() => Nudge(ShowAction.Previous), () => IsRunning);
         _nextCommand = new RelayCommand(() => Nudge(ShowAction.Next), () => IsRunning);
         _blackCommand = new RelayCommand(() => Nudge(ShowAction.BlackScreen), () => IsRunning);
+        _sendContentCommand = new RelayCommand(SendContentAsync, () => IsRunning && !_isSending);
         SetRoleCommand = new RelayCommand(parameter =>
         {
             ApplyRole(parameter as string);
@@ -77,6 +91,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             AllowFirewall();
             return Task.CompletedTask;
         });
+        PickContentCommand = new RelayCommand(PickContentAsync);
 
         Load();
         RefreshIps();
@@ -94,6 +109,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public Func<string, Task>? CopyText { get; set; }
 
+    public Func<Task<string?>>? PickFile { get; set; }
+
     public string MachineName => _machineName;
     public bool IsWindows { get; } = OperatingSystem.IsWindows();
 
@@ -105,6 +122,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public RelayCommand SetRoleCommand { get; }
     public RelayCommand CopyIpCommand { get; }
     public RelayCommand FirewallCommand { get; }
+    public RelayCommand SendContentCommand => _sendContentCommand;
+    public RelayCommand PickContentCommand { get; }
 
     public string BindAddress
     {
@@ -277,6 +296,77 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public string ThisLaptopHint =>
         "On the other laptop, set outgoing IP to " + ThisLaptopIp + " and outgoing port to " + ListenPortText + ".";
 
+    public string ContentPath
+    {
+        get => _contentPath;
+        set => Set(ref _contentPath, value, save: true);
+    }
+
+    public string LayerText
+    {
+        get => _layerText;
+        set => Set(ref _layerText, value.Trim(), save: true);
+    }
+
+    public string ClipText
+    {
+        get => _clipText;
+        set => Set(ref _clipText, value.Trim(), save: true);
+    }
+
+    public string ResolumePortText
+    {
+        get => _resolumePortText;
+        set => Set(ref _resolumePortText, value.Trim(), save: true);
+    }
+
+    public bool PlayAfterLoad
+    {
+        get => _playAfterLoad;
+        set => Set(ref _playAfterLoad, value, save: true);
+    }
+
+    public bool LoadOnThisLaptop
+    {
+        get => _loadOnThisLaptop;
+        set => Set(ref _loadOnThisLaptop, value, save: true);
+    }
+
+    public string ExtraLaptops
+    {
+        get => _extraLaptops;
+        set => Set(ref _extraLaptops, value, save: true);
+    }
+
+    public bool IsSending
+    {
+        get => _isSending;
+        private set
+        {
+            if (!Set(ref _isSending, value, save: false))
+                return;
+            _sendContentCommand.RaiseCanExecuteChanged();
+        }
+    }
+
+    public double ContentProgress
+    {
+        get => _contentProgress;
+        private set => Set(ref _contentProgress, value, save: false);
+    }
+
+    public string ContentStatus
+    {
+        get => _contentStatus;
+        private set
+        {
+            if (Set(ref _contentStatus, value, save: false))
+                Raise(nameof(HasContentStatus));
+        }
+    }
+
+    public bool HasContentStatus => ContentStatus.Length > 0;
+
     public void Dispose()
     {
         if (_disposed)
@@ -366,6 +456,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         if (!string.IsNullOrWhiteSpace(endpoints.RemoteHost))
             AddLog("Outgoing address is " + endpoints.RemoteHost + ":" + endpoints.RemotePort + ".");
         AddLog("Click the PowerPoint window when you are ready. Typing in this window is not sent.");
+        await StartMediaAsync(endpoints);
     }
 
     private void Stop()
@@ -373,13 +464,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var link = _link;
         var node = _node;
         var slides = _slides;
+        var media = _media;
         _link = null;
         _node = null;
         _slides = null;
+        _media = null;
         link?.Dispose();
         slides?.Dispose();
         if (node != null)
             _ = node.DisposeAsync();
+        if (media != null)
+            _ = media.DisposeAsync();
         if (!IsRunning)
             return;
         IsRunning = false;
@@ -398,6 +493,170 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         _link.Nudge(action);
     }
+
+    private async Task StartMediaAsync(LinkEndpoints endpoints)
+    {
+        if (_node == null)
+            return;
+        if (endpoints.ListenPort >= 65535)
+        {
+            AddLog("Incoming port 65535 leaves no room for Resolume content. Use 24710. Slide sync still works.");
+            return;
+        }
+
+        var directory = Path.Combine(_settingsDir, "media");
+        var media = new MediaServer(directory, endpoints.Channel, async (header, path, token) =>
+        {
+            var port = CurrentResolumePort();
+            var loaded = await _resolume.OpenAsync(path, header.Layer, header.Clip, header.Play, port, token).ConfigureAwait(false);
+            var detail = loaded + " Saved at " + path + ".";
+            Ui(() => AddLog(detail));
+            return detail;
+        });
+        try
+        {
+            await media.StartAsync(endpoints.BindAddress, endpoints.ListenPort + 1);
+        }
+        catch (Exception ex)
+        {
+            await media.DisposeAsync();
+            AddLog("Resolume content port did not open. Slide sync still works. " + ex.Message);
+            return;
+        }
+
+        if (_node == null)
+        {
+            await media.DisposeAsync();
+            return;
+        }
+
+        _media = media;
+        AddLog("Resolume content listens on port " + media.BoundPort + ". Received clips are saved in " + directory + ".");
+    }
+
+    private async Task PickContentAsync()
+    {
+        if (PickFile == null)
+            return;
+        var path = await PickFile();
+        if (path == null)
+            return;
+        if (path.Length == 0)
+        {
+            FormError = "Choose a file that is saved on this laptop.";
+            return;
+        }
+
+        ContentPath = path;
+        FormError = "";
+    }
+
+    private async Task SendContentAsync()
+    {
+        if (!IsRunning || _media == null)
+        {
+            FormError = _media == null && IsRunning
+                ? "The content port is not open. Stop the link and start it again."
+                : "Start the link on this laptop and on every backup first.";
+            return;
+        }
+
+        if (!File.Exists(ContentPath))
+        {
+            FormError = "Choose a video or picture that is saved on this laptop.";
+            return;
+        }
+
+        if (!int.TryParse(LayerText, out var layer) || layer < 1)
+        {
+            FormError = "Layer starts at 1, matching the number in Resolume.";
+            return;
+        }
+
+        if (!int.TryParse(ClipText, out var clip) || clip < 1)
+        {
+            FormError = "Clip starts at 1, matching the number in Resolume.";
+            return;
+        }
+
+        var resolumePort = CurrentResolumePort();
+        if (resolumePort is < 1 or > 65535)
+        {
+            FormError = "Resolume port must be from 1 to 65535.";
+            return;
+        }
+
+        if (!int.TryParse(RemotePortText, out var remotePort) || remotePort is < 1 or > 65534)
+            remotePort = 24710;
+        var targets = MediaNames.Targets(RemoteAddress, remotePort, ExtraLaptops);
+        if (targets.Count == 0 && !LoadOnThisLaptop)
+        {
+            FormError = "Add the backup laptops under outgoing IP, or list them on the Resolume tab.";
+            return;
+        }
+
+        IsSending = true;
+        FormError = "";
+        ContentProgress = 0;
+        var failures = new List<string>();
+        try
+        {
+            AddLog("Sending " + Path.GetFileName(ContentPath) + " to layer " + layer + ", clip " + clip + ".");
+            var index = 0;
+            foreach (var target in targets)
+            {
+                index++;
+                ContentStatus = "Sending to " + target.Host + " (" + index + " of " + targets.Count + ")...";
+                ContentProgress = 0;
+                var progress = new Progress<double>(value => ContentProgress = value);
+                try
+                {
+                    var receipt = await MediaClient.SendFileAsync(
+                        target.Host,
+                        target.Port,
+                        Channel,
+                        ContentPath,
+                        layer,
+                        clip,
+                        PlayAfterLoad,
+                        progress);
+                    AddLog(target.Host + ": " + receipt.Detail);
+                    if (!receipt.Ok)
+                        failures.Add(target.Host + ": " + receipt.Detail);
+                }
+                catch (Exception ex)
+                {
+                    var message = target.Host + " did not receive the file. Start the link on that laptop first.";
+                    AddLog(message + " " + ex.Message);
+                    failures.Add(message);
+                }
+            }
+
+            if (LoadOnThisLaptop)
+            {
+                ContentStatus = "Loading on this laptop...";
+                var local = await _resolume.OpenAsync(ContentPath, layer, clip, PlayAfterLoad, resolumePort, CancellationToken.None);
+                AddLog(local);
+                if (!local.StartsWith("Loaded", StringComparison.Ordinal))
+                    failures.Add(local);
+            }
+
+            ContentProgress = failures.Count == 0 ? 1 : 0;
+            ContentStatus = failures.Count == 0
+                ? targets.Count == 0
+                    ? "Loaded on this laptop."
+                    : "Sent to " + targets.Count + (targets.Count == 1 ? " laptop." : " laptops.")
+                : "Finished with a problem. The activity log has the detail.";
+            FormError = failures.Count == 0 ? "" : failures[0];
+        }
+        finally
+        {
+            IsSending = false;
+        }
+    }
+
+    private int CurrentResolumePort() =>
+        int.TryParse(ResolumePortText, out var port) && port is >= 1 and <= 65535 ? port : 8080;
 
     private async Task CopyIpAsync()
     {
@@ -431,9 +690,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         try
         {
-            FirewallRule.Allow(port);
+            var ports = port < 65535 ? new[] { port, port + 1 } : new[] { port };
+            FirewallRule.Allow(ports);
             FormError = "";
-            AddLog("Windows will ask permission to open incoming port " + port + ".");
+            AddLog(ports.Length == 1
+                ? "Windows will ask permission to open incoming port " + port + "."
+                : "Windows will ask permission to open incoming port " + port + " and content port " + (port + 1) + ".");
         }
         catch (Exception ex)
         {
@@ -532,6 +794,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _previousCommand.RaiseCanExecuteChanged();
         _nextCommand.RaiseCanExecuteChanged();
         _blackCommand.RaiseCanExecuteChanged();
+        _sendContentCommand.RaiseCanExecuteChanged();
         SetRoleCommand.RaiseCanExecuteChanged();
     }
 
@@ -552,6 +815,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         FollowSlides = settings.FollowSlides;
         AcceptKeyboard = settings.AcceptKeyboard;
         AcceptMouse = settings.AcceptMouse;
+        ResolumePortText = settings.ResolumePort is < 1 or > 65535 ? "8080" : settings.ResolumePort.ToString();
+        LayerText = settings.Layer < 1 ? "1" : settings.Layer.ToString();
+        ClipText = settings.Clip < 1 ? "1" : settings.Clip.ToString();
+        PlayAfterLoad = settings.PlayAfterLoad;
+        LoadOnThisLaptop = settings.LoadOnThisLaptop;
+        ExtraLaptops = settings.ExtraLaptops ?? "";
+        ContentPath = settings.ContentPath ?? "";
         Role = string.IsNullOrWhiteSpace(settings.Role) ? "Primary" : settings.Role;
         _loading = false;
     }
@@ -562,6 +832,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             return;
         int.TryParse(ListenPortText, out var listen);
         int.TryParse(RemotePortText, out var remote);
+        int.TryParse(ResolumePortText, out var resolumePort);
+        int.TryParse(LayerText, out var layer);
+        int.TryParse(ClipText, out var clip);
         SettingsStore.Save(_settingsDir, new AppSettings
         {
             BindAddress = BindAddress,
@@ -577,7 +850,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             PublishSlides = PublishSlides,
             FollowSlides = FollowSlides,
             AcceptKeyboard = AcceptKeyboard,
-            AcceptMouse = AcceptMouse
+            AcceptMouse = AcceptMouse,
+            ResolumePort = resolumePort is < 1 or > 65535 ? 8080 : resolumePort,
+            Layer = layer < 1 ? 1 : layer,
+            Clip = clip < 1 ? 1 : clip,
+            PlayAfterLoad = PlayAfterLoad,
+            LoadOnThisLaptop = LoadOnThisLaptop,
+            ExtraLaptops = ExtraLaptops,
+            ContentPath = ContentPath
         });
     }
 

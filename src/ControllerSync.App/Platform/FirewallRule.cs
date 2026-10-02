@@ -4,17 +4,21 @@ namespace ControllerSync.App.Platform;
 
 public static class FirewallRule
 {
-    public static void Allow(int port)
+    public static void Allow(params int[] ports)
     {
-        if (port is < 1 or > 65535)
+        var distinct = ports.Where(port => port is >= 1 and <= 65535).Distinct().ToArray();
+        if (distinct.Length == 0)
             throw new InvalidOperationException("Incoming port must be a number from 1 to 65535.");
 
+        var commands = string.Join(
+            " & ",
+            distinct.Select(port =>
+                "netsh advfirewall firewall add rule " +
+                $"name=\"ControllerSync {port}\" dir=in action=allow protocol=TCP localport={port}"));
         var start = new ProcessStartInfo
         {
             FileName = "cmd.exe",
-            Arguments =
-                "/c netsh advfirewall firewall add rule " +
-                $"name=\"ControllerSync {port}\" dir=in action=allow protocol=TCP localport={port}",
+            Arguments = "/c " + commands,
             UseShellExecute = true,
             Verb = "runas",
             WindowStyle = ProcessWindowStyle.Hidden
